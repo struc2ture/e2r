@@ -1,11 +1,16 @@
 CompileFlags:
     Add: [
+        "-isystem/opt/homebrew/include",
+        "-isystem/usr/local/include",
+        "-isystem/Users/struc/dev/shared/stb",
         "-Wall",
         "-Wextra",
         "-Wno-unused-function",
         "-Wno-unused-parameter",
         "-Wno-unused-variable",
-        "-Wno-unused-but-set-variable"
+        "-Wno-unused-but-set-variable",
+        "-xc",
+        "-std=c99"
     ]
 Diagnostics:
     UnusedIncludes: None
