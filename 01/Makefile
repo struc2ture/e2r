@@ -10,3 +10,9 @@ debug: bin/test
 
 bin/test: $(wildcard src/*)
 	clang $(CFLAGS) src/main.c src/e2r_core.c -o bin/test $(LFLAGS)
+
+bin/shaders/tri.vert.spv: src/shaders/tri.vert
+	glslc $< -o $@
+
+bin/shaders/tri.frag.spv: src/shaders/tri.frag
+	glslc $< -o $@
