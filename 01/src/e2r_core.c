@@ -7,6 +7,44 @@
 #include "types.h"
 #include "util.h"
 
+#define MAX_FRAMES_IN_FLIGHT 2
+
+typedef struct Vk_SwapchainBundle
+{
+    VkSwapchainKHR swapchain;
+    VkSurfaceFormatKHR format;
+    VkImage *images;
+    u32 image_count;
+    VkExtent2D extent;
+
+} Vk_SwapchainBundle;
+
+typedef struct Vk_RenderTarget
+{
+    VkImageView color_view;
+    // VkImageView depth_view;
+    VkFramebuffer framebuffer;
+
+} Vk_RenderTarget;
+
+typedef struct Vk_RenderTargetGroup
+{
+    VkRenderPass render_pass;
+    Vk_RenderTarget *render_targets;
+    u32 render_target_count;
+    VkFormat color_format;
+    VkFormat depth_format;
+
+} Vk_RenderTargetGroup;
+
+typedef struct Vk_Frame
+{
+    VkImage swapchain_image;
+    VkImageView swapchain_image_view;
+    VkFramebuffer framebuffer;
+
+} Vk_Frame;
+
 typedef struct E2R_Ctx
 {
     GLFWwindow *glfw_window;
@@ -18,7 +56,11 @@ typedef struct E2R_Ctx
     VkDevice vk_device;
     VkQueue vk_queue;
 
-    VkSwapchainKHR vk_swapchain;
+    Vk_SwapchainBundle vk_swapchain_bundle;
+
+    Vk_RenderTargetGroup vk_render_target_group;
+
+    Vk_Frame *vk_frames;
 
     VkRenderPass vk_render_pass;
     VkPipelineLayout vk_pipeline_layout;
@@ -166,7 +208,7 @@ VkQueue _vk_get_queue()
     return vk_graphics_queue;
 }
 
-VkSwapchainKHR _vk_create_swapchain()
+Vk_SwapchainBundle _vk_create_swapchain_bundle()
 {
     VkSurfaceCapabilitiesKHR capabilities;
     VkResult result = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.vk_physical_device, ctx.vk_surface, &capabilities);
@@ -181,19 +223,23 @@ VkSwapchainKHR _vk_create_swapchain()
     result = vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.vk_physical_device, ctx.vk_surface, &format_count, formats);
     if (result != VK_SUCCESS) fatal("Failed to get physical device-surface formats 2");
 
-    VkSurfaceFormatKHR vk_surface_format = formats[0];
-    assert(vk_surface_format.format == VK_FORMAT_B8G8R8A8_UNORM && vk_surface_format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
+    VkSurfaceFormatKHR surface_format = formats[0];
+    assert(surface_format.format == VK_FORMAT_B8G8R8A8_UNORM && surface_format.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR);
 
     free(formats);
 
-    uint32_t vk_image_count = 2;
+    u32 image_count = capabilities.minImageCount + 1;
+    if (capabilities.maxImageCount > 0 && image_count > capabilities.maxImageCount)
+    {
+        image_count = capabilities.maxImageCount;
+    }
 
     VkSwapchainCreateInfoKHR swapchain_create_info = {};
     swapchain_create_info.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
     swapchain_create_info.surface = ctx.vk_surface;
-    swapchain_create_info.minImageCount = vk_image_count;
-    swapchain_create_info.imageFormat = vk_surface_format.format;
-    swapchain_create_info.imageColorSpace = vk_surface_format.colorSpace;
+    swapchain_create_info.minImageCount = image_count;
+    swapchain_create_info.imageFormat = surface_format.format;
+    swapchain_create_info.imageColorSpace = surface_format.colorSpace;
     swapchain_create_info.imageExtent = capabilities.currentExtent;
     swapchain_create_info.imageArrayLayers = 1;
     swapchain_create_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
@@ -203,12 +249,184 @@ VkSwapchainKHR _vk_create_swapchain()
     swapchain_create_info.presentMode = VK_PRESENT_MODE_FIFO_KHR; // vsync
     swapchain_create_info.clipped = VK_TRUE;
 
-    VkSwapchainKHR vk_swapchain;
-    result = vkCreateSwapchainKHR(ctx.vk_device, &swapchain_create_info, NULL, &vk_swapchain);
+    VkSwapchainKHR swapchain;
+    result = vkCreateSwapchainKHR(ctx.vk_device, &swapchain_create_info, NULL, &swapchain);
     if (result != VK_SUCCESS) fatal("Failed to create swapchain");
 
-    return vk_swapchain;
+    result = vkGetSwapchainImagesKHR(ctx.vk_device, swapchain, &image_count, NULL);
+    if (result != VK_SUCCESS) fatal("Failed to get swapchain images");
+
+    VkImage *images = xmalloc(image_count * sizeof(images[0]));
+
+    result = vkGetSwapchainImagesKHR(ctx.vk_device, swapchain, &image_count, images);
+    if (result != VK_SUCCESS) fatal("Failed to get swapchain images 2");
+
+    return (Vk_SwapchainBundle){
+        .format = surface_format,
+        .swapchain = swapchain,
+        .image_count = image_count,
+        .images = images,
+        .extent = capabilities.currentExtent
+    };
 }
+
+//Vk_DepthImageBundle _vk_create_depth_images() ???
+
+Vk_RenderTargetGroup _vk_create_render_target_group()
+{
+    Vk_RenderTargetGroup render_target_group =
+    {
+        .color_format = ctx.vk_swapchain_bundle.format.format,
+        // .depth_format = VK_FORMAT_D32_SFLOAT,
+        .render_target_count = ctx.vk_swapchain_bundle.image_count
+    };
+
+    VkAttachmentDescription color_attachment_description = {};
+    color_attachment_description.format = render_target_group.color_format;
+    color_attachment_description.samples = VK_SAMPLE_COUNT_1_BIT;
+    color_attachment_description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attachment_description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attachment_description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    color_attachment_description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference color_attachment_reference = {};
+    color_attachment_reference.attachment = 0;
+    color_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    // VkAttachmentDescription depth_attachment_description = {};
+    // depth_attachment_description.format = render_target_group.depth_format;
+    // depth_attachment_description.samples = VK_SAMPLE_COUNT_1_BIT;
+    // depth_attachment_description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    // depth_attachment_description.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // depth_attachment_description.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    // depth_attachment_description.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    // depth_attachment_description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    // depth_attachment_description.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    // VkAttachmentReference depth_attachment_reference = {};
+    // depth_attachment_reference.attachment = 1; // index in pAttachments
+    // depth_attachment_reference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass_description = {};
+    subpass_description.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass_description.colorAttachmentCount = 1;
+    subpass_description.pColorAttachments = &color_attachment_reference;
+    // subpass_description.pDepthStencilAttachment = &depth_attachment_reference;
+
+    // VkAttachmentDescription render_pass_attachments[] = { color_attachment_description, depth_attachment_description };
+    VkAttachmentDescription render_pass_attachments[] = { color_attachment_description };
+    VkRenderPassCreateInfo render_pass_create_info = {};
+    render_pass_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    render_pass_create_info.attachmentCount = array_count(render_pass_attachments);
+    render_pass_create_info.pAttachments = render_pass_attachments;
+    render_pass_create_info.subpassCount = 1;
+    render_pass_create_info.pSubpasses = &subpass_description;
+
+    VkRenderPass render_pass;
+    VkResult result = vkCreateRenderPass(ctx.vk_device, &render_pass_create_info, NULL, &render_pass);
+    if (result != VK_SUCCESS) fatal("Failed to create render pass");
+
+    render_target_group.render_pass = render_pass;
+
+    Vk_RenderTarget *render_targets = xmalloc(render_target_group.render_target_count * sizeof(render_targets[0]));
+
+    for (u32 i = 0; i < render_target_group.render_target_count; i++)
+    {
+        VkImageViewCreateInfo image_view_create_info = {};
+        image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        image_view_create_info.image = ctx.vk_swapchain_bundle.images[i];
+        image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        image_view_create_info.format = ctx.vk_swapchain_bundle.format.format;
+        image_view_create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        image_view_create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        image_view_create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        image_view_create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        image_view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        image_view_create_info.subresourceRange.baseMipLevel = 0;
+        image_view_create_info.subresourceRange.levelCount = 1;
+        image_view_create_info.subresourceRange.baseArrayLayer = 0;
+        image_view_create_info.subresourceRange.layerCount = 1;
+
+        VkResult result = vkCreateImageView(ctx.vk_device, &image_view_create_info, NULL, &render_targets[i].color_view);
+        if (result != VK_SUCCESS) fatal("Failed to create image view");
+
+        // VkImageView attachments[] = { temp_vulkan.image_views[i], temp_vulkan.depth_buffer_image_view };
+        VkImageView attachments[] = { render_targets[i].color_view };
+
+        VkFramebufferCreateInfo framebuffer_create_info = {};
+        framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebuffer_create_info.renderPass = render_pass;
+        framebuffer_create_info.attachmentCount = array_count(attachments);
+        framebuffer_create_info.pAttachments = attachments;
+        framebuffer_create_info.width = ctx.vk_swapchain_bundle.extent.width;
+        framebuffer_create_info.height = ctx.vk_swapchain_bundle.extent.height;
+        framebuffer_create_info.layers = 1;
+
+        result = vkCreateFramebuffer(ctx.vk_device, &framebuffer_create_info, NULL, &render_targets[i].framebuffer);
+        if (result != VK_SUCCESS) fatal("Failed to create framebuffer");
+    }
+
+    render_target_group.render_targets = render_targets;
+
+    return render_target_group;
+}
+
+#if 0
+void _vk_create_frames(int image_count)
+{
+    u32 actual_image_count;
+    VkResult result = vkGetSwapchainImagesKHR(ctx.vk_device, ctx.vk_swapchain, &actual_image_count, NULL);
+    if (result != VK_SUCCESS) fatal("Failed to get swapchain images");
+
+    VkImage *vk_swapchain_images = xmalloc(actual_image_count * sizeof(vk_swapchain_images[0]));
+
+    result = vkGetSwapchainImagesKHR(ctx.vk_device, ctx.vk_swapchain, &actual_image_count, vk_swapchain_images);
+    if (result != VK_SUCCESS) fatal("Failed to get swapchain images 2");
+    assert(ctx.vk_frame_count == actual_image_count);
+
+    ctx.vk_frames = xmalloc(ctx.vk_frame_count * sizeof(ctx.vk_frames[0]));
+
+    for (u32 i = 0; i < ctx.vk_frame_count; i++)
+    {
+        ctx.vk_frames[i].swapchain_image = vk_swapchain_images[i];
+
+        VkImageViewCreateInfo view_create_info = {};
+        view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        view_create_info.image = vk_swapchain_images[i];
+        view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        view_create_info.format = ctx.vk_surface_format.format;
+        view_create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        view_create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        view_create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        view_create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        view_create_info.subresourceRange.baseMipLevel = 0;
+        view_create_info.subresourceRange.levelCount = 1;
+        view_create_info.subresourceRange.baseArrayLayer = 0;
+        view_create_info.subresourceRange.layerCount = 1;
+
+        result = vkCreateImageView(ctx.vk_device, &view_create_info, NULL, &ctx.vk_frames[i].swapchain_image_view);
+        if (result != VK_SUCCESS) fatal("Failed to create image view");
+
+        VkImageView attachments[] = { temp_vulkan.image_views[i], temp_vulkan.depth_buffer_image_view };
+
+        VkFramebufferCreateInfo framebuffer_create_info = {};
+        framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        framebuffer_create_info.renderPass = temp_vulkan.render_pass;
+        framebuffer_create_info.attachmentCount = array_count(attachments);
+        framebuffer_create_info.pAttachments = attachments;
+        framebuffer_create_info.width = temp_vulkan.swapchain_extent.width;
+        framebuffer_create_info.height = temp_vulkan.swapchain_extent.height;
+        framebuffer_create_info.layers = 1;
+
+        result = vkCreateFramebuffer(vk_device, &framebuffer_create_info, NULL, &temp_vulkan.framebuffers[i]);
+        if (result != VK_SUCCESS) fatal("Failed to create framebuffer");
+    }
+
+
+    free(vk_swapchain_images);
+}
+#endif
 
 VkShaderModule _vk_create_shader_module(const char *path)
 {
@@ -239,6 +457,7 @@ typedef struct Vertex
 {
     v3 pos;
     v4 color;
+
 } Vertex;
 
 VkPipeline _vk_create_pipeline()
@@ -372,6 +591,26 @@ VkPipeline _vk_create_pipeline()
 
 // --------------------------------
 
+void _vk_destroy_swapchain_bundle(Vk_SwapchainBundle *bundle)
+{
+    vkDestroySwapchainKHR(ctx.vk_device, bundle->swapchain, NULL);
+    *bundle = (Vk_SwapchainBundle){};
+}
+
+void _vk_destroy_render_target_group(Vk_RenderTargetGroup *group)
+{
+    for (u32 i = 0; i < group->render_target_count; i++)
+    {
+        vkDestroyImageView(ctx.vk_device, group->render_targets[i].color_view, NULL);
+        // vkDestroyImageView(ctx.vk_device, group->render_targets[i].depth_view)
+        vkDestroyFramebuffer(ctx.vk_device, group->render_targets[i].framebuffer, NULL);
+    }
+    vkDestroyRenderPass(ctx.vk_device, group->render_pass, NULL);
+    *group = (Vk_RenderTargetGroup){};
+}
+
+// --------------------------------
+
 void e2r_init(int width, int height, const char *name)
 {
     ctx.glfw_window = _glfw_create_window(width, height, name);
@@ -382,13 +621,18 @@ void e2r_init(int width, int height, const char *name)
     ctx.vk_device = _vk_create_device();
     ctx.vk_queue = _vk_get_queue();
 
-    ctx.vk_swapchain = _vk_create_swapchain();
+    ctx.vk_swapchain_bundle = _vk_create_swapchain_bundle();
+
+    ctx.vk_render_target_group = _vk_create_render_target_group();
 
     ctx.vk_pipeline = _vk_create_pipeline();
 }
 
 void e2r_destroy()
 {
+    _vk_destroy_render_target_group(&ctx.vk_render_target_group);
+    _vk_destroy_swapchain_bundle(&ctx.vk_swapchain_bundle);
+
     vkDestroyDevice(ctx.vk_device, NULL);
     vkDestroySurfaceKHR(ctx.vk_instance, ctx.vk_surface, NULL);
     vkDestroyInstance(ctx.vk_instance, NULL);
