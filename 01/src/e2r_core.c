@@ -7,7 +7,7 @@
 #include "types.h"
 #include "util.h"
 
-#define MAX_FRAMES_IN_FLIGHT 2
+#define FRAMES_IN_FLIGHT 2
 
 typedef struct Vk_SwapchainBundle
 {
@@ -39,11 +39,19 @@ typedef struct Vk_RenderTargetGroup
 
 typedef struct Vk_Frame
 {
-    VkImage swapchain_image;
-    VkImageView swapchain_image_view;
-    VkFramebuffer framebuffer;
+    VkCommandBuffer command_buffer;
+    VkSemaphore image_available_semaphore;
+    VkSemaphore render_finished_semaphore;
+    VkFence in_flight_fence;
 
 } Vk_Frame;
+
+typedef struct Vk_FrameBundle
+{
+    Vk_Frame *frames;
+    u32 count;
+
+} Vk_FrameBundle;
 
 typedef struct E2R_Ctx
 {
@@ -59,8 +67,10 @@ typedef struct E2R_Ctx
     Vk_SwapchainBundle vk_swapchain_bundle;
 
     Vk_RenderTargetGroup vk_render_target_group;
+    
+    VkCommandPool vk_command_pool;
 
-    Vk_Frame *vk_frames;
+    Vk_FrameBundle vk_frame_bundle;
 
     VkRenderPass vk_render_pass;
     VkPipelineLayout vk_pipeline_layout;
@@ -371,62 +381,71 @@ Vk_RenderTargetGroup _vk_create_render_target_group()
     return render_target_group;
 }
 
-#if 0
-void _vk_create_frames(int image_count)
+VkCommandPool _vk_create_command_pool()
 {
-    u32 actual_image_count;
-    VkResult result = vkGetSwapchainImagesKHR(ctx.vk_device, ctx.vk_swapchain, &actual_image_count, NULL);
-    if (result != VK_SUCCESS) fatal("Failed to get swapchain images");
+    VkCommandPoolCreateInfo command_pool_create_info = {};
+    command_pool_create_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    command_pool_create_info.queueFamilyIndex = ctx.vk_queue_family_index;
+    command_pool_create_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // allows resetting individual buffers
 
-    VkImage *vk_swapchain_images = xmalloc(actual_image_count * sizeof(vk_swapchain_images[0]));
+    VkCommandPool command_pool;
+    VkResult result = vkCreateCommandPool(ctx.vk_device, &command_pool_create_info, NULL, &command_pool);
+    if (result != VK_SUCCESS) fatal("Failed to create command pool");
 
-    result = vkGetSwapchainImagesKHR(ctx.vk_device, ctx.vk_swapchain, &actual_image_count, vk_swapchain_images);
-    if (result != VK_SUCCESS) fatal("Failed to get swapchain images 2");
-    assert(ctx.vk_frame_count == actual_image_count);
+    return command_pool;
+}
 
-    ctx.vk_frames = xmalloc(ctx.vk_frame_count * sizeof(ctx.vk_frames[0]));
-
-    for (u32 i = 0; i < ctx.vk_frame_count; i++)
+Vk_FrameBundle _vk_create_frame_bundle()
+{
+    Vk_FrameBundle frame_bundle =
     {
-        ctx.vk_frames[i].swapchain_image = vk_swapchain_images[i];
+        .count = FRAMES_IN_FLIGHT,
+    };
 
-        VkImageViewCreateInfo view_create_info = {};
-        view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        view_create_info.image = vk_swapchain_images[i];
-        view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        view_create_info.format = ctx.vk_surface_format.format;
-        view_create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-        view_create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-        view_create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-        view_create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-        view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        view_create_info.subresourceRange.baseMipLevel = 0;
-        view_create_info.subresourceRange.levelCount = 1;
-        view_create_info.subresourceRange.baseArrayLayer = 0;
-        view_create_info.subresourceRange.layerCount = 1;
+    Vk_Frame *frames = xmalloc(frame_bundle.count * sizeof(frames[0]));
 
-        result = vkCreateImageView(ctx.vk_device, &view_create_info, NULL, &ctx.vk_frames[i].swapchain_image_view);
-        if (result != VK_SUCCESS) fatal("Failed to create image view");
+    for (u32 i = 0; i < frame_bundle.count; i++)
+    {
+        VkCommandBufferAllocateInfo command_buffer_allocate_info = {};
+        command_buffer_allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+        command_buffer_allocate_info.commandPool = ctx.vk_command_pool;
+        command_buffer_allocate_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        command_buffer_allocate_info.commandBufferCount = 1;
 
-        VkImageView attachments[] = { temp_vulkan.image_views[i], temp_vulkan.depth_buffer_image_view };
+        VkCommandBuffer command_buffer;
+        VkResult result = vkAllocateCommandBuffers(ctx.vk_device, &command_buffer_allocate_info, &command_buffer);
+        if (result != VK_SUCCESS) fatal("Failed to allocate command buffer");
 
-        VkFramebufferCreateInfo framebuffer_create_info = {};
-        framebuffer_create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        framebuffer_create_info.renderPass = temp_vulkan.render_pass;
-        framebuffer_create_info.attachmentCount = array_count(attachments);
-        framebuffer_create_info.pAttachments = attachments;
-        framebuffer_create_info.width = temp_vulkan.swapchain_extent.width;
-        framebuffer_create_info.height = temp_vulkan.swapchain_extent.height;
-        framebuffer_create_info.layers = 1;
+        VkSemaphoreCreateInfo semaphore_create_info = {};
+        semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
-        result = vkCreateFramebuffer(vk_device, &framebuffer_create_info, NULL, &temp_vulkan.framebuffers[i]);
-        if (result != VK_SUCCESS) fatal("Failed to create framebuffer");
+        VkSemaphore image_available_semaphore;
+        result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &image_available_semaphore);
+        if (result != VK_SUCCESS) fatal("Failed to create image available semaphore");
+
+        VkSemaphore render_finished_semaphore;
+        result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &render_finished_semaphore);
+        if (result != VK_SUCCESS) fatal("Failed to create render finished semaphore");
+
+        VkFenceCreateInfo fence_create_info = {};
+        fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+        VkFence in_flight_fence;
+        result = vkCreateFence(ctx.vk_device, &fence_create_info, NULL, &in_flight_fence);
+        if (result != VK_SUCCESS) fatal("Failed to create in flight fence");
+
+        frames[i] = (Vk_Frame){
+            .command_buffer = command_buffer,
+            .image_available_semaphore = image_available_semaphore,
+            .render_finished_semaphore = render_finished_semaphore,
+            .in_flight_fence = in_flight_fence
+        };
     }
 
+    frame_bundle.frames = frames;
 
-    free(vk_swapchain_images);
+    return frame_bundle;
 }
-#endif
 
 VkShaderModule _vk_create_shader_module(const char *path)
 {
@@ -609,6 +628,26 @@ void _vk_destroy_render_target_group(Vk_RenderTargetGroup *group)
     *group = (Vk_RenderTargetGroup){};
 }
 
+void _vk_destroy_command_pool(VkCommandPool *command_pool)
+{
+    vkDestroyCommandPool(ctx.vk_device, *command_pool, NULL);
+    *command_pool = VK_NULL_HANDLE;
+}
+
+void _vk_destroy_frame_bundle(Vk_FrameBundle *bundle)
+{
+    for (u32 i = 0; i < bundle->count; i++)
+    {
+        vkDestroySemaphore(ctx.vk_device, bundle->frames[i].image_available_semaphore, NULL);
+        vkDestroySemaphore(ctx.vk_device, bundle->frames[i].render_finished_semaphore, NULL);
+        vkDestroyFence(ctx.vk_device, bundle->frames[i].in_flight_fence, NULL);
+    }
+
+    free(bundle->frames);
+
+    *bundle = (Vk_FrameBundle){};
+}
+
 // --------------------------------
 
 void e2r_init(int width, int height, const char *name)
@@ -625,11 +664,17 @@ void e2r_init(int width, int height, const char *name)
 
     ctx.vk_render_target_group = _vk_create_render_target_group();
 
-    ctx.vk_pipeline = _vk_create_pipeline();
+    ctx.vk_command_pool = _vk_create_command_pool();
+
+    // ctx.vk_pipeline = _vk_create_pipeline();
 }
 
 void e2r_destroy()
 {
+    _vk_destroy_frame_bundle(&ctx.vk_frame_bundle);
+
+    _vk_destroy_command_pool(&ctx.vk_command_pool);
+
     _vk_destroy_render_target_group(&ctx.vk_render_target_group);
     _vk_destroy_swapchain_bundle(&ctx.vk_swapchain_bundle);
 
