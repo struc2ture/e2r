@@ -17,6 +17,7 @@ typedef struct Vk_SwapchainBundle
     VkSwapchainKHR swapchain;
     VkSurfaceFormatKHR format;
     VkImage *images;
+    VkSemaphore *submit_semaphores;
     u32 image_count;
     VkExtent2D extent;
 
@@ -43,9 +44,8 @@ typedef struct Vk_RenderTargetGroup
 typedef struct Vk_Frame
 {
     VkCommandBuffer command_buffer;
-    VkSemaphore image_available_semaphore;
-    VkSemaphore render_finished_semaphore;
     VkFence in_flight_fence;
+    VkSemaphore acquire_semaphore;
 
 } Vk_Frame;
 
@@ -285,11 +285,23 @@ Vk_SwapchainBundle _vk_create_swapchain_bundle()
     result = vkGetSwapchainImagesKHR(ctx.vk_device, swapchain, &image_count, images);
     if (result != VK_SUCCESS) fatal("Failed to get swapchain images 2");
 
+    VkSemaphoreCreateInfo semaphore_create_info = {};
+    semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    VkSemaphore *submit_semaphores = xmalloc(image_count * sizeof(submit_semaphores[0]));
+
+    for (u32 i = 0; i < image_count; i++)
+    {
+        result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &submit_semaphores[i]);
+        if (result != VK_SUCCESS) fatal("Failed to create submit semaphore");
+    }
+
     return (Vk_SwapchainBundle){
         .format = surface_format,
         .swapchain = swapchain,
         .image_count = image_count,
         .images = images,
+        .submit_semaphores = submit_semaphores,
         .extent = capabilities.currentExtent
     };
 }
@@ -430,17 +442,6 @@ Vk_FrameBundle _vk_create_frame_bundle()
         VkResult result = vkAllocateCommandBuffers(ctx.vk_device, &command_buffer_allocate_info, &command_buffer);
         if (result != VK_SUCCESS) fatal("Failed to allocate command buffer");
 
-        VkSemaphoreCreateInfo semaphore_create_info = {};
-        semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-        VkSemaphore image_available_semaphore;
-        result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &image_available_semaphore);
-        if (result != VK_SUCCESS) fatal("Failed to create image available semaphore");
-
-        VkSemaphore render_finished_semaphore;
-        result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &render_finished_semaphore);
-        if (result != VK_SUCCESS) fatal("Failed to create render finished semaphore");
-
         VkFenceCreateInfo fence_create_info = {};
         fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
         fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
@@ -449,11 +450,17 @@ Vk_FrameBundle _vk_create_frame_bundle()
         result = vkCreateFence(ctx.vk_device, &fence_create_info, NULL, &in_flight_fence);
         if (result != VK_SUCCESS) fatal("Failed to create in flight fence");
 
+        VkSemaphoreCreateInfo semaphore_create_info = {};
+        semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        VkSemaphore acquire_semaphore;
+        result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &acquire_semaphore);
+        if (result != VK_SUCCESS) fatal("Failed to create acquire semaphore");
+
         frames[i] = (Vk_Frame){
             .command_buffer = command_buffer,
-            .image_available_semaphore = image_available_semaphore,
-            .render_finished_semaphore = render_finished_semaphore,
-            .in_flight_fence = in_flight_fence
+            .in_flight_fence = in_flight_fence,
+            .acquire_semaphore = acquire_semaphore
         };
     }
 
@@ -691,6 +698,11 @@ Vk_PipelineBundle _vk_create_pipeline_bundle()
 
 void _vk_destroy_swapchain_bundle(Vk_SwapchainBundle *bundle)
 {
+    for (u32 i = 0; i < bundle->image_count; i++)
+    {
+        vkDestroySemaphore(ctx.vk_device, bundle->submit_semaphores[i], NULL);
+    }
+    free(bundle->submit_semaphores);
     vkDestroySwapchainKHR(ctx.vk_device, bundle->swapchain, NULL);
     *bundle = (Vk_SwapchainBundle){};
 }
@@ -717,8 +729,7 @@ void _vk_destroy_frame_bundle(Vk_FrameBundle *bundle)
 {
     for (u32 i = 0; i < bundle->count; i++)
     {
-        vkDestroySemaphore(ctx.vk_device, bundle->frames[i].image_available_semaphore, NULL);
-        vkDestroySemaphore(ctx.vk_device, bundle->frames[i].render_finished_semaphore, NULL);
+        vkDestroySemaphore(ctx.vk_device, bundle->frames[i].acquire_semaphore, NULL);
         vkDestroyFence(ctx.vk_device, bundle->frames[i].in_flight_fence, NULL);
     }
 
@@ -760,6 +771,8 @@ void e2r_init(int width, int height, const char *name)
 
 void e2r_destroy()
 {
+    vkDeviceWaitIdle(ctx.vk_device);
+
     _vk_destroy_pipeline_bundle(&ctx.vk_tri_pipeline_bundle);
 
     _vk_destroy_frame_bundle(&ctx.vk_frame_bundle);
@@ -810,7 +823,7 @@ void e2r_draw()
     memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_data_ptr, verts, sizeof(verts));
 
     u32 next_image_index;
-    VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->image_available_semaphore, VK_NULL_HANDLE, &next_image_index);
+    VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->acquire_semaphore, VK_NULL_HANDLE, &next_image_index);
     if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
     {
         // recreate_everything = true;
@@ -857,12 +870,12 @@ void e2r_draw()
     VkSubmitInfo submit_info = {};
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = &frame->image_available_semaphore;
+    submit_info.pWaitSemaphores = &frame->acquire_semaphore;
     submit_info.pWaitDstStageMask = wait_destination_stage_mask;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &frame->command_buffer;
     submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = &frame->render_finished_semaphore;
+    submit_info.pSignalSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
 
     result = vkQueueSubmit(ctx.vk_queue, 1, &submit_info, frame->in_flight_fence);
     if (result != VK_SUCCESS) fatal("Failed to submit command buffer to queue");
@@ -871,7 +884,7 @@ void e2r_draw()
     VkPresentInfoKHR present_info = {};
     present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = &frame->render_finished_semaphore;
+    present_info.pWaitSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
     present_info.swapchainCount = 1;
     present_info.pSwapchains = &ctx.vk_swapchain_bundle.swapchain;
     present_info.pImageIndices = &next_image_index;
