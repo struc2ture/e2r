@@ -11,6 +11,10 @@ int main()
     while (e2r_is_running())
     {
         e2r_start_frame();
+
+        e2r_draw();
+
+        e2r_end_frame();
     }
 
     e2r_destroy();
