@@ -1,5 +1,7 @@
 #include "e2r_core.h"
 
+#include <string.h>
+
 #include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan_core.h>
@@ -84,6 +86,7 @@ typedef struct E2R_Ctx
     VkCommandPool vk_command_pool;
 
     Vk_FrameBundle vk_frame_bundle;
+    u32 current_vk_frame;
 
     Vk_PipelineBundle vk_tri_pipeline_bundle;
 
@@ -440,6 +443,7 @@ Vk_FrameBundle _vk_create_frame_bundle()
 
         VkFenceCreateInfo fence_create_info = {};
         fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
         VkFence in_flight_fence;
         result = vkCreateFence(ctx.vk_device, &fence_create_info, NULL, &in_flight_fence);
@@ -747,10 +751,9 @@ void e2r_init(int width, int height, const char *name)
     ctx.vk_queue = _vk_get_queue();
 
     ctx.vk_swapchain_bundle = _vk_create_swapchain_bundle();
-
     ctx.vk_render_target_group = _vk_create_render_target_group();
-
     ctx.vk_command_pool = _vk_create_command_pool();
+    ctx.vk_frame_bundle = _vk_create_frame_bundle();
 
     ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle();
 }
@@ -781,9 +784,102 @@ bool e2r_is_running()
 
 void e2r_start_frame()
 {
+    const Vk_Frame *frame = &ctx.vk_frame_bundle.frames[ctx.current_vk_frame];
+    vkWaitForFences(ctx.vk_device, 1, &frame->in_flight_fence, true, UINT64_MAX);
+    vkResetFences(ctx.vk_device, 1, &frame->in_flight_fence);
+
     glfwPollEvents();
 }
 
 void e2r_end_frame()
 {
+    ctx.current_vk_frame = (ctx.current_vk_frame + 1) % FRAMES_IN_FLIGHT;
+}
+
+void e2r_draw()
+{
+    const Vk_Frame *frame = &ctx.vk_frame_bundle.frames[ctx.current_vk_frame];
+
+    const Vertex verts[] =
+    {
+        {V3(-0.5f, -0.5f, 0.0f), V4(1.0f, 0.0f, 0.0f, 1.0f)},
+        {V3( 0.5f, -0.5f, 0.0f), V4(0.0f, 1.0f, 0.0f, 1.0f)},
+        {V3( 0.0f,  0.5f, 0.0f), V4(0.0f, 0.0f, 1.0f, 1.0f)},
+    };
+
+    memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_data_ptr, verts, sizeof(verts));
+
+    u32 next_image_index;
+    VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->image_available_semaphore, VK_NULL_HANDLE, &next_image_index);
+    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        // recreate_everything = true;
+        // continue;
+    }
+    else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
+
+    result = vkResetCommandBuffer(frame->command_buffer, 0);
+    if (result != VK_SUCCESS) fatal("Failed to reset command buffer");
+
+    VkCommandBufferBeginInfo command_buffer_begin_info = {};
+    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    result = vkBeginCommandBuffer(frame->command_buffer, &command_buffer_begin_info);
+    if (result != VK_SUCCESS) fatal("Failed to begin command buffer");
+
+    VkClearValue clear_values[2] = {};
+    clear_values[0].color = (VkClearColorValue){{1.0f, 0.0f, 0.0f, 1.0f}};
+    clear_values[1].depthStencil = (VkClearDepthStencilValue){1.0f, 0};
+    VkRect2D render_area = {};
+    render_area.offset = (VkOffset2D){0, 0};
+    render_area.extent = ctx.vk_swapchain_bundle.extent;
+    VkRenderPassBeginInfo render_pass_begin_info = {};
+    render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    render_pass_begin_info.renderPass = ctx.vk_render_target_group.render_pass;
+    render_pass_begin_info.framebuffer = ctx.vk_render_target_group.render_targets[next_image_index].framebuffer;
+    render_pass_begin_info.renderArea = render_area;
+    render_pass_begin_info.clearValueCount = array_count(clear_values);
+    render_pass_begin_info.pClearValues = clear_values;
+    vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+    vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
+
+    VkDeviceSize offsets[] = {0};
+    vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer, offsets);
+
+    vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
+
+    vkCmdEndRenderPass(frame->command_buffer);
+    result = vkEndCommandBuffer(frame->command_buffer);
+    if (result != VK_SUCCESS) fatal("Failed to end command buffer");
+
+    // Submit command buffer
+    VkPipelineStageFlags wait_destination_stage_mask[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+    VkSubmitInfo submit_info = {};
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.waitSemaphoreCount = 1;
+    submit_info.pWaitSemaphores = &frame->image_available_semaphore;
+    submit_info.pWaitDstStageMask = wait_destination_stage_mask;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &frame->command_buffer;
+    submit_info.signalSemaphoreCount = 1;
+    submit_info.pSignalSemaphores = &frame->render_finished_semaphore;
+
+    result = vkQueueSubmit(ctx.vk_queue, 1, &submit_info, frame->in_flight_fence);
+    if (result != VK_SUCCESS) fatal("Failed to submit command buffer to queue");
+
+    // Present
+    VkPresentInfoKHR present_info = {};
+    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    present_info.waitSemaphoreCount = 1;
+    present_info.pWaitSemaphores = &frame->render_finished_semaphore;
+    present_info.swapchainCount = 1;
+    present_info.pSwapchains = &ctx.vk_swapchain_bundle.swapchain;
+    present_info.pImageIndices = &next_image_index;
+    result = vkQueuePresentKHR(ctx.vk_queue, &present_info);
+    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
+    {
+        // recreate_everything = true;
+        // continue;
+    }
+    else if (result != VK_SUCCESS) fatal("Error when presenting");
 }

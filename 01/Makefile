@@ -5,7 +5,7 @@ export VK_ICD_FILENAMES = /usr/local/share/vulkan/icd.d/MoltenVK_icd.json
 export VK_LAYER_PATH = /usr/local/share/vulkan/explicit_layer.d
 export DYLD_LIBRARY_PATH = /usr/local/lib:$DYLD_LIBRARY_PATH
 
-debug: bin/test
+debug: bin/test bin/shaders/tri.vert.spv bin/shaders/tri.frag.spv
 	lldb bin/test -o run
 
 bin/test: $(wildcard src/*)
