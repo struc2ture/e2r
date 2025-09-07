@@ -1,6 +1,6 @@
 #pragma once
 
-#include "types.h"
+#include "common/types.h"
 
 void e2r_init(int width, int height, const char *name);
 void e2r_destroy();

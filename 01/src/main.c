@@ -1,8 +1,8 @@
 #include <stdio.h>
 
 #include "e2r_core.h"
-#include "types.h"
-#include "util.h"
+#include "common/types.h"
+#include "common/util.h"
 
 int main()
 {

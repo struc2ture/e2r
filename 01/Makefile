@@ -8,8 +8,11 @@ export DYLD_LIBRARY_PATH = /usr/local/lib:$DYLD_LIBRARY_PATH
 debug: bin/test bin/shaders/tri.vert.spv bin/shaders/tri.frag.spv
 	lldb bin/test -o run
 
-bin/test: $(wildcard src/*)
-	clang $(CFLAGS) src/main.c src/e2r_core.c -o bin/test $(LFLAGS)
+bin/test: $(wildcard src/*) bin/common.o
+	clang $(CFLAGS) src/main.c src/e2r_core.c bin/common.o -o bin/test $(LFLAGS)
+
+bin/common.o: $(wildcard src/common/*)
+	clang -c $(CFLAGS) src/common/common.c -o bin/common.o
 
 bin/shaders/tri.vert.spv: src/shaders/tri.vert
 	glslc $< -o $@

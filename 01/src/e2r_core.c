@@ -6,8 +6,9 @@
 #include <GLFW/glfw3.h>
 #include <vulkan/vulkan_core.h>
 
-#include "types.h"
-#include "util.h"
+#include "common/lin_math.h"
+#include "common/types.h"
+#include "common/util.h"
 
 #define FRAMES_IN_FLIGHT 2
 #define MAX_VERTEX_COUNT 1024
@@ -41,6 +42,22 @@ typedef struct Vk_RenderTargetGroup
 
 } Vk_RenderTargetGroup;
 
+typedef struct Vk_BufferBundle
+{
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+    void *data_ptr;
+    VkDeviceSize max_size;
+
+} Vk_BufferBundle;
+
+typedef struct Vk_BufferBundleList
+{
+    Vk_BufferBundle *buffer_bundles;
+    u32 count;
+
+} Vk_BufferBundleList;
+
 typedef struct Vk_Frame
 {
     VkCommandBuffer command_buffer;
@@ -49,24 +66,52 @@ typedef struct Vk_Frame
 
 } Vk_Frame;
 
-typedef struct Vk_FrameBundle
+typedef struct Vk_FrameList
 {
     Vk_Frame *frames;
     u32 count;
 
-} Vk_FrameBundle;
+} Vk_FrameList;
 
 typedef struct Vk_PipelineBundle
 {
-    VkPipelineLayout layout;
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkPipelineLayout pipeline_layout;
+
+    VkDescriptorPool descriptor_pool;
+    VkDescriptorSet *descriptor_sets;
+    u32 descriptor_set_count;
+
     VkPipeline pipeline;
 
     u32 max_vertex_count;
-    VkBuffer vertex_buffer;
-    VkDeviceMemory vertex_buffer_memory;
-    void *vertex_buffer_data_ptr;
+    Vk_BufferBundle vertex_buffer_bundle;
 
 } Vk_PipelineBundle;
+
+// ------------------------------------
+
+typedef struct Vertex
+{
+    v3 pos;
+    v4 color;
+
+} Vertex;
+
+typedef struct UBO_Layout_Global_2D
+{
+    m4 view_proj;
+
+} UBO_Layout_Global_2D;
+
+// typedef struct UBO_Layout_Global_3D
+// {
+//     m4 model;
+//     m4 view_proj;
+
+// } UBO_Layout_Global_3D;
+
+// ------------------------------------
 
 typedef struct E2R_Ctx
 {
@@ -85,8 +130,11 @@ typedef struct E2R_Ctx
     
     VkCommandPool vk_command_pool;
 
-    Vk_FrameBundle vk_frame_bundle;
+    Vk_FrameList vk_frame_list;
     u32 current_vk_frame;
+
+    Vk_BufferBundleList global_ubo_2d;
+    // Vk_BufferBundleList global_ubo_3d;
 
     Vk_PipelineBundle vk_tri_pipeline_bundle;
 
@@ -421,9 +469,9 @@ VkCommandPool _vk_create_command_pool()
     return command_pool;
 }
 
-Vk_FrameBundle _vk_create_frame_bundle()
+Vk_FrameList _vk_create_frame_list()
 {
-    Vk_FrameBundle frame_bundle =
+    Vk_FrameList frame_bundle =
     {
         .count = FRAMES_IN_FLIGHT,
     };
@@ -494,13 +542,6 @@ VkShaderModule _vk_create_shader_module(const char *path)
     return module;
 }
 
-typedef struct Vertex
-{
-    v3 pos;
-    v4 color;
-
-} Vertex;
-
 u32 _vk_find_memory_type(VkPhysicalDevice physical_device, u32 type_filter, VkMemoryPropertyFlags props)
 {
     VkPhysicalDeviceMemoryProperties mem_props;
@@ -517,52 +558,165 @@ u32 _vk_find_memory_type(VkPhysicalDevice physical_device, u32 type_filter, VkMe
     return 0;
 }
 
-Vk_PipelineBundle _vk_create_pipeline_bundle()
+Vk_BufferBundle _vk_create_buffer_bundle(VkDeviceSize max_size, VkBufferUsageFlags usage)
+{
+    // Create uniform buffer
+    VkBufferCreateInfo uniform_buffer_create_info = {};
+    uniform_buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    uniform_buffer_create_info.size = max_size;
+    uniform_buffer_create_info.usage = usage;
+    uniform_buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    VkBuffer buffer;
+    VkResult result = vkCreateBuffer(ctx.vk_device, &uniform_buffer_create_info, NULL, &buffer);
+    if (result != VK_SUCCESS) fatal("Failed to create uniform buffer");
+
+    // Allocate memory for uniform buffer
+    VkMemoryRequirements memory_requirements;
+    (void)vkGetBufferMemoryRequirements(ctx.vk_device, buffer, &memory_requirements);
+
+    VkMemoryAllocateInfo memory_allocate_info = {};
+    memory_allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    memory_allocate_info.allocationSize = memory_requirements.size;
+    memory_allocate_info.memoryTypeIndex = _vk_find_memory_type(
+        ctx.vk_physical_device,
+        memory_requirements.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    VkDeviceMemory device_memory;
+    result = vkAllocateMemory(ctx.vk_device, &memory_allocate_info, NULL, &device_memory);
+    if (result != VK_SUCCESS) fatal("Failed to allocate memory for uniform buffer");
+
+    result = vkBindBufferMemory(ctx.vk_device, buffer, device_memory, 0);
+    if (result != VK_SUCCESS) fatal("Failed to bind memory to uniform buffer");
+
+    void *data;
+    result = vkMapMemory(ctx.vk_device, device_memory, 0, max_size, 0, &data);
+    if (result != VK_SUCCESS) fatal("Failed to map vertex buffer memory");
+
+    return (Vk_BufferBundle){
+        .buffer = buffer,
+        .memory = device_memory,
+        .data_ptr = data,
+        .max_size = max_size
+    };
+}
+
+Vk_BufferBundleList _vk_create_buffer_bundle_list(VkDeviceSize max_size, VkBufferUsageFlags usage)
+{
+    Vk_BufferBundleList buffer_bundle_list =
+    {
+        .count = FRAMES_IN_FLIGHT
+    };
+
+    Vk_BufferBundle *buffer_bundles = xmalloc(buffer_bundle_list.count * sizeof(buffer_bundles[0]));
+
+    for (u32 i = 0; i < buffer_bundle_list.count; i++)
+    {
+        buffer_bundles[i] = _vk_create_buffer_bundle(max_size, usage);
+    }
+
+    buffer_bundle_list.buffer_bundles = buffer_bundles;
+
+    return buffer_bundle_list;
+}
+
+Vk_PipelineBundle _vk_create_pipeline_bundle_tri()
 {
     Vk_PipelineBundle pipeline_bundle =
     {
         .max_vertex_count = MAX_VERTEX_COUNT
     };
-    VkDeviceSize vertex_buffer_size = pipeline_bundle.max_vertex_count * sizeof(Vertex);
 
-    VkBufferCreateInfo vertex_buffer_create_info = {};
-    vertex_buffer_create_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    vertex_buffer_create_info.size = vertex_buffer_size;
-    vertex_buffer_create_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
-    vertex_buffer_create_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    u32 frame_count = FRAMES_IN_FLIGHT;
 
-    VkBuffer vertex_buffer;
-    VkResult result = vkCreateBuffer(ctx.vk_device, &vertex_buffer_create_info, NULL, &vertex_buffer);
-    if (result != VK_SUCCESS) fatal("Failed to create vertex buffer");
+    // Descriptor set layout
+    VkDescriptorSetLayoutBinding descriptor_set_layout_binding_0 = {};
+    descriptor_set_layout_binding_0.binding = 0;
+    descriptor_set_layout_binding_0.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptor_set_layout_binding_0.descriptorCount = 1;
+    descriptor_set_layout_binding_0.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    descriptor_set_layout_binding_0.pImmutableSamplers = NULL;
 
-    // Allocate memory for vertex buffer
-    VkMemoryRequirements vertex_buffer_memory_requirements;
-    vkGetBufferMemoryRequirements(ctx.vk_device, vertex_buffer, &vertex_buffer_memory_requirements);
+    VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] = {descriptor_set_layout_binding_0};
+    VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
+    descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    descriptor_set_layout_create_info.bindingCount = array_count(descriptor_set_layout_bindings);
+    descriptor_set_layout_create_info.pBindings = descriptor_set_layout_bindings;
 
-    VkMemoryAllocateInfo vertex_buffer_memory_allocate_info = {};
-    vertex_buffer_memory_allocate_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-    vertex_buffer_memory_allocate_info.allocationSize = vertex_buffer_memory_requirements.size;
-    vertex_buffer_memory_allocate_info.memoryTypeIndex = _vk_find_memory_type(
-        ctx.vk_physical_device,
-        vertex_buffer_memory_requirements.memoryTypeBits,
-        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    VkDescriptorSetLayout descriptor_set_layout;
+    VkResult result = vkCreateDescriptorSetLayout(ctx.vk_device, &descriptor_set_layout_create_info, NULL, &descriptor_set_layout);
+    if (result != VK_SUCCESS) fatal("Failed to create descriptor set layout");
+
+    VkPipelineLayoutCreateInfo pipeline_layout_create_info = {};
+    pipeline_layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    pipeline_layout_create_info.setLayoutCount = 1;
+    pipeline_layout_create_info.pSetLayouts = &descriptor_set_layout;
+    // pipeline_layout_create_info.pushConstantRangeCount = 1;
+    // pipeline_layout_create_info.pPushConstantRanges = &mvp_push_constant_range;
+
+    VkPipelineLayout pipeline_layout;
+    result = vkCreatePipelineLayout(ctx.vk_device, &pipeline_layout_create_info, NULL, &pipeline_layout);
+    if (result != VK_SUCCESS) fatal("Failed to create pipeline layout");
+
+    pipeline_bundle.vertex_buffer_bundle = _vk_create_buffer_bundle(
+        pipeline_bundle.max_vertex_count * sizeof(Vertex),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
 
-    VkDeviceMemory vertex_buffer_memory;
-    result = vkAllocateMemory(ctx.vk_device, &vertex_buffer_memory_allocate_info, NULL, &vertex_buffer_memory);
-    if (result != VK_SUCCESS) fatal("Failed to allocate memory for vertex buffer");
+    pipeline_bundle.descriptor_set_layout = descriptor_set_layout;
+    pipeline_bundle.pipeline_layout = pipeline_layout;
 
-    result = vkBindBufferMemory(ctx.vk_device, vertex_buffer, vertex_buffer_memory, 0);
-    if (result != VK_SUCCESS) fatal("Failed to bind memory to vertex buffer");
+    // Descriptor pool
+    VkDescriptorPoolSize descriptor_pool_sizes[1] = {};
+    descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    descriptor_pool_sizes[0].descriptorCount = frame_count;
+    // descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    // descriptor_pool_sizes[1].descriptorCount = 1;
 
-    // Upload data to the vertex buffer
-    void *vertex_buffer_data_ptr;
-    result = vkMapMemory(ctx.vk_device, vertex_buffer_memory, 0, vertex_buffer_size, 0, &vertex_buffer_data_ptr);
-    if (result != VK_SUCCESS) fatal("Failed to map vertex buffer memory");
+    VkDescriptorPoolCreateInfo decriptor_pool_create_info = {};
+    decriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+    decriptor_pool_create_info.poolSizeCount = 1;
+    decriptor_pool_create_info.pPoolSizes = descriptor_pool_sizes;
+    decriptor_pool_create_info.maxSets = frame_count;
 
-    pipeline_bundle.vertex_buffer = vertex_buffer;
-    pipeline_bundle.vertex_buffer_memory = vertex_buffer_memory;
-    pipeline_bundle.vertex_buffer_data_ptr = vertex_buffer_data_ptr;
+    VkDescriptorPool descriptor_pool;
+    result = vkCreateDescriptorPool(ctx.vk_device, &decriptor_pool_create_info, NULL, &descriptor_pool);
+    if (result != VK_SUCCESS) fatal("Failed to create descriptor pool");
+
+    VkDescriptorSetAllocateInfo descriptor_set_allocate_info = {};
+    descriptor_set_allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+    descriptor_set_allocate_info.descriptorPool = descriptor_pool;
+    descriptor_set_allocate_info.descriptorSetCount = 1;
+    descriptor_set_allocate_info.pSetLayouts = &descriptor_set_layout;
+
+    VkDescriptorSet *descriptor_sets = xmalloc(frame_count * sizeof(descriptor_sets[0]));
+    for (u32 i = 0; i < frame_count; i++)
+    {
+        result = vkAllocateDescriptorSets(ctx.vk_device, &descriptor_set_allocate_info, &descriptor_sets[i]);
+        if (result != VK_SUCCESS) fatal("Failed to allocate descriptor set");
+
+        const Vk_BufferBundle *buffer_bundle = &ctx.global_ubo_2d.buffer_bundles[i];
+        VkDescriptorBufferInfo descriptor_buffer_info = {};
+        descriptor_buffer_info.buffer = buffer_bundle->buffer;
+        descriptor_buffer_info.offset = 0;
+        descriptor_buffer_info.range = buffer_bundle->max_size;
+
+        VkWriteDescriptorSet uniform_buffer_write_descriptor_set = {};
+        uniform_buffer_write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+        uniform_buffer_write_descriptor_set.dstSet = descriptor_sets[i];
+        uniform_buffer_write_descriptor_set.dstBinding = 0;
+        uniform_buffer_write_descriptor_set.dstArrayElement = 0;
+        uniform_buffer_write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        uniform_buffer_write_descriptor_set.descriptorCount = 1;
+        uniform_buffer_write_descriptor_set.pBufferInfo = &descriptor_buffer_info;
+
+        vkUpdateDescriptorSets(ctx.vk_device, 1, &uniform_buffer_write_descriptor_set, 0, NULL);
+    }
+
+    pipeline_bundle.descriptor_pool = descriptor_pool;
+    pipeline_bundle.descriptor_sets = descriptor_sets;
+    pipeline_bundle.descriptor_set_count = frame_count;
 
     VkShaderModule vk_vert_shader_module = _vk_create_shader_module("bin/shaders/tri.vert.spv");
     VkShaderModule vk_frag_shader_module = _vk_create_shader_module("bin/shaders/tri.frag.spv");
@@ -653,17 +807,6 @@ Vk_PipelineBundle _vk_create_pipeline_bundle()
     // mvp_push_constant_range.offset = 0;
     // mvp_push_constant_range.size = sizeof(m4);
 
-    VkPipelineLayoutCreateInfo pipeline_layout_create_info = {};
-    pipeline_layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    // pipeline_layout_create_info.setLayoutCount = 1;
-    // pipeline_layout_create_info.pSetLayouts = &temp_vulkan.descriptor_set_layout;
-    // pipeline_layout_create_info.pushConstantRangeCount = 1;
-    // pipeline_layout_create_info.pPushConstantRanges = &mvp_push_constant_range;
-
-    VkPipelineLayout pipeline_layout;
-    result = vkCreatePipelineLayout(ctx.vk_device, &pipeline_layout_create_info, NULL, &pipeline_layout);
-    if (result != VK_SUCCESS) fatal("Failed to create pipeline layout");
-    
     VkGraphicsPipelineCreateInfo graphics_pipeline_create_info = {};
     graphics_pipeline_create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
     graphics_pipeline_create_info.stageCount = array_count(pipeline_shader_stage_create_infos);
@@ -689,7 +832,6 @@ Vk_PipelineBundle _vk_create_pipeline_bundle()
     vkDestroyShaderModule(ctx.vk_device, vk_frag_shader_module, NULL);
 
     pipeline_bundle.pipeline = pipeline;
-    pipeline_bundle.layout = pipeline_layout;
 
     return pipeline_bundle;
 }
@@ -725,26 +867,52 @@ void _vk_destroy_command_pool(VkCommandPool *command_pool)
     *command_pool = VK_NULL_HANDLE;
 }
 
-void _vk_destroy_frame_bundle(Vk_FrameBundle *bundle)
+void _vk_destroy_frame_list(Vk_FrameList *list)
 {
-    for (u32 i = 0; i < bundle->count; i++)
+    for (u32 i = 0; i < list->count; i++)
     {
-        vkDestroySemaphore(ctx.vk_device, bundle->frames[i].acquire_semaphore, NULL);
-        vkDestroyFence(ctx.vk_device, bundle->frames[i].in_flight_fence, NULL);
+        vkDestroySemaphore(ctx.vk_device, list->frames[i].acquire_semaphore, NULL);
+        vkDestroyFence(ctx.vk_device, list->frames[i].in_flight_fence, NULL);
     }
 
-    free(bundle->frames);
+    free(list->frames);
 
-    *bundle = (Vk_FrameBundle){};
+    *list = (Vk_FrameList){};
+}
+
+void _vk_destroy_buffer_bundle(Vk_BufferBundle *bundle)
+{
+    vkUnmapMemory(ctx.vk_device, bundle->memory);
+    vkFreeMemory(ctx.vk_device, bundle->memory, NULL);
+    vkDestroyBuffer(ctx.vk_device, bundle->buffer, NULL);
+    *bundle = (Vk_BufferBundle){};
+}
+
+void _vk_destroy_buffer_bundle_list(Vk_BufferBundleList *list)
+{
+    for (u32 i = 0; i < list->count; i++)
+    {
+        _vk_destroy_buffer_bundle(&list->buffer_bundles[i]);
+    }
+    free(list->buffer_bundles);
+    *list = (Vk_BufferBundleList){};
 }
 
 void _vk_destroy_pipeline_bundle(Vk_PipelineBundle *bundle)
 {
-    vkUnmapMemory(ctx.vk_device, bundle->vertex_buffer_memory);
-    vkFreeMemory(ctx.vk_device, bundle->vertex_buffer_memory, NULL);
-    vkDestroyBuffer(ctx.vk_device, bundle->vertex_buffer, NULL);
+    _vk_destroy_buffer_bundle(&bundle->vertex_buffer_bundle);
 
-    vkDestroyPipelineLayout(ctx.vk_device, bundle->layout, NULL);
+    // VkResult result = vkFreeDescriptorSets(ctx.vk_device, bundle->descriptor_pool, bundle->descriptor_set_count, bundle->descriptor_sets);
+    // if (result != VK_SUCCESS) fatal("Failed to free descriptor sets");
+
+    free(bundle->descriptor_sets);
+
+    vkDestroyDescriptorPool(ctx.vk_device, bundle->descriptor_pool, NULL);
+
+    vkDestroyDescriptorSetLayout(ctx.vk_device, bundle->descriptor_set_layout, NULL);
+
+    vkDestroyPipelineLayout(ctx.vk_device, bundle->pipeline_layout, NULL);
+
     vkDestroyPipeline(ctx.vk_device, bundle->pipeline, NULL);
     *bundle = (Vk_PipelineBundle){};
 }
@@ -764,9 +932,12 @@ void e2r_init(int width, int height, const char *name)
     ctx.vk_swapchain_bundle = _vk_create_swapchain_bundle();
     ctx.vk_render_target_group = _vk_create_render_target_group();
     ctx.vk_command_pool = _vk_create_command_pool();
-    ctx.vk_frame_bundle = _vk_create_frame_bundle();
+    ctx.vk_frame_list = _vk_create_frame_list();
 
-    ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle();
+    ctx.global_ubo_2d = _vk_create_buffer_bundle_list(sizeof(UBO_Layout_Global_2D), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+    // ctx.global_ubo_3d = _vk_create_buffer_bundle_list(sizeof(UBO_Layout_Global_3D), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+
+    ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle_tri();
 }
 
 void e2r_destroy()
@@ -775,7 +946,10 @@ void e2r_destroy()
 
     _vk_destroy_pipeline_bundle(&ctx.vk_tri_pipeline_bundle);
 
-    _vk_destroy_frame_bundle(&ctx.vk_frame_bundle);
+    _vk_destroy_buffer_bundle_list(&ctx.global_ubo_2d);
+    // _vk_destroy_buffer_bundle_list(&ctx.global_ubo_3d);
+
+    _vk_destroy_frame_list(&ctx.vk_frame_list);
 
     _vk_destroy_command_pool(&ctx.vk_command_pool);
 
@@ -797,7 +971,7 @@ bool e2r_is_running()
 
 void e2r_start_frame()
 {
-    const Vk_Frame *frame = &ctx.vk_frame_bundle.frames[ctx.current_vk_frame];
+    const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
     vkWaitForFences(ctx.vk_device, 1, &frame->in_flight_fence, true, UINT64_MAX);
     vkResetFences(ctx.vk_device, 1, &frame->in_flight_fence);
 
@@ -811,7 +985,7 @@ void e2r_end_frame()
 
 void e2r_draw()
 {
-    const Vk_Frame *frame = &ctx.vk_frame_bundle.frames[ctx.current_vk_frame];
+    const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
 
     const Vertex verts[] =
     {
@@ -820,7 +994,7 @@ void e2r_draw()
         {V3( 0.0f,  0.5f, 0.0f), V4(0.0f, 0.0f, 1.0f, 1.0f)},
     };
 
-    memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_data_ptr, verts, sizeof(verts));
+    memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
 
     u32 next_image_index;
     VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->acquire_semaphore, VK_NULL_HANDLE, &next_image_index);
@@ -857,7 +1031,7 @@ void e2r_draw()
     vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
 
     VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer, offsets);
+    vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
 
     vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
 
