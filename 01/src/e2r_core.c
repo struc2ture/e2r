@@ -621,7 +621,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle()
     pipeline_rasterization_state_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     pipeline_rasterization_state_create_info.polygonMode = VK_POLYGON_MODE_FILL;
     pipeline_rasterization_state_create_info.lineWidth = 1.0f;
-    pipeline_rasterization_state_create_info.cullMode = VK_CULL_MODE_BACK_BIT;
+    pipeline_rasterization_state_create_info.cullMode = VK_CULL_MODE_NONE;
     pipeline_rasterization_state_create_info.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
     VkPipelineMultisampleStateCreateInfo pipeline_multisample_state_create_info = {};
@@ -840,7 +840,7 @@ void e2r_draw()
     if (result != VK_SUCCESS) fatal("Failed to begin command buffer");
 
     VkClearValue clear_values[2] = {};
-    clear_values[0].color = (VkClearColorValue){{1.0f, 0.0f, 0.0f, 1.0f}};
+    clear_values[0].color = (VkClearColorValue){{1.0f, 1.0f, 0.0f, 1.0f}};
     clear_values[1].depthStencil = (VkClearDepthStencilValue){1.0f, 0};
     VkRect2D render_area = {};
     render_area.offset = (VkOffset2D){0, 0};
