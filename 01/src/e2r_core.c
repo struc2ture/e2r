@@ -100,7 +100,7 @@ typedef struct Vertex
 
 typedef struct UBO_Layout_Global_2D
 {
-    m4 view_proj;
+    m4 proj;
 
 } UBO_Layout_Global_2D;
 
@@ -989,9 +989,9 @@ void e2r_draw()
 
     const Vertex verts[] =
     {
-        {V3(-0.5f, -0.5f, 0.0f), V4(1.0f, 0.0f, 0.0f, 1.0f)},
-        {V3( 0.5f, -0.5f, 0.0f), V4(0.0f, 1.0f, 0.0f, 1.0f)},
-        {V3( 0.0f,  0.5f, 0.0f), V4(0.0f, 0.0f, 1.0f, 1.0f)},
+        {V3(100.0f, 200.0f, 0.0f), V4(1.0f, 0.0f, 0.0f, 1.0f)},
+        {V3(200.0f, 200.0f, 0.0f), V4(0.0f, 1.0f, 0.0f, 1.0f)},
+        {V3(150.0f, 100.0f, 0.0f), V4(0.0f, 0.0f, 1.0f, 1.0f)},
     };
 
     memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
@@ -1004,6 +1004,16 @@ void e2r_draw()
         // continue;
     }
     else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
+
+    UBO_Layout_Global_2D ubo_data =
+    {
+        .proj = m4_proj_ortho(
+            0.0f, (f32) ctx.vk_swapchain_bundle.extent.width,
+            0.0f, (f32) ctx.vk_swapchain_bundle.extent.height,
+            -1.0f, 1.0f
+        )
+    };
+    memcpy(ctx.global_ubo_2d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
 
     result = vkResetCommandBuffer(frame->command_buffer, 0);
     if (result != VK_SUCCESS) fatal("Failed to reset command buffer");
@@ -1032,6 +1042,14 @@ void e2r_draw()
 
     VkDeviceSize offsets[] = {0};
     vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
+
+    vkCmdBindDescriptorSets(
+        frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+        ctx.vk_tri_pipeline_bundle.pipeline_layout,
+        0,
+        1, &ctx.vk_tri_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
+        0, NULL
+    );
 
     vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
 

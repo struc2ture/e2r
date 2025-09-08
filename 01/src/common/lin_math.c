@@ -13,6 +13,8 @@ v3 v3_normalize(v3 v)
     return result;
 }
 
+// --------------------------------------------
+
 m4 m4_identity()
 {
     m4 m;
@@ -22,6 +24,78 @@ m4 m4_identity()
     m.d[3] = 0; m.d[7] = 0; m.d[11] = 0; m.d[15] = 1;
     return m;
 }
+
+// --------------------------------------------
+
+m4 m4_translate(f32 x, f32 y, f32 z)
+{
+    m4 m = m4_identity();
+    m.d[12] = x;
+    m.d[13] = y;
+    m.d[14] = z;
+    return m;
+}
+
+m4 m4_rotate(float angle_rad, v3 axis)
+{
+    float c = cosf(angle_rad);
+    float s = sinf(angle_rad);
+    float ic = 1.0f - c;
+
+    axis = v3_normalize(axis);
+
+    m4 r;
+    r.d[0]  = c + axis.x*axis.x*ic;
+    r.d[1]  = axis.y*axis.x*ic + axis.z*s;
+    r.d[2]  = axis.z*axis.x*ic - axis.y*s;
+    r.d[3]  = 0.0f;
+
+    r.d[4]  = axis.x*axis.y*ic - axis.z*s;
+    r.d[5]  = c + axis.y*axis.y*ic;
+    r.d[6]  = axis.z*axis.y*ic + axis.x*s;
+    r.d[7]  = 0.0f;
+
+    r.d[8]  = axis.x*axis.z*ic + axis.y*s;
+    r.d[9]  = axis.y*axis.z*ic - axis.x*s;
+    r.d[10] = c + axis.z*axis.z*ic;
+    r.d[11] = 0.0f;
+
+    r.d[12] = 0.0f;
+    r.d[13] = 0.0f;
+    r.d[14] = 0.0f;
+    r.d[15] = 1.0f;
+    return r;
+}
+
+m4 m4_scale(v3 scale)
+{
+    m4 m = m4_identity();
+    m.d[0] = scale.x;
+    m.d[5] = scale.y;
+    m.d[10] = scale.z;
+    return m;
+}
+
+// --------------------------------------------
+
+m4 m4_mul(m4 a, m4 b)
+{
+    m4 m;
+    for (int col = 0; col < 4; col++)
+    {
+        for (int row = 0; row < 4; row++)
+        {
+            m.d[col * 4 + row] = 0.0f;
+            for (int k = 0; k < 4; k++)
+            {
+                m.d[col * 4 + row] += a.d[k * 4 + row] * b.d[col * 4 + k];
+            }
+        }
+    }
+    return m;
+}
+
+// --------------------------------------------
 
 m4 m4_proj_ortho(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far)
 {
@@ -67,62 +141,7 @@ m4 m4_proj_perspective(f32 fov, f32 aspect, f32 znear, f32 zfar)
     return m;
 }
 
-m4 m4_translate(f32 x, f32 y, f32 z)
-{
-    m4 m = m4_identity();
-    m.d[12] = x;
-    m.d[13] = y;
-    m.d[14] = z;
-    return m;
-}
-
-m4 m4_rotate(float angle_rad, v3 axis)
-{
-    float c = cosf(angle_rad);
-    float s = sinf(angle_rad);
-    float ic = 1.0f - c;
-
-    axis = v3_normalize(axis);
-
-    m4 r;
-    r.d[0]  = c + axis.x*axis.x*ic;
-    r.d[1]  = axis.y*axis.x*ic + axis.z*s;
-    r.d[2]  = axis.z*axis.x*ic - axis.y*s;
-    r.d[3]  = 0.0f;
-
-    r.d[4]  = axis.x*axis.y*ic - axis.z*s;
-    r.d[5]  = c + axis.y*axis.y*ic;
-    r.d[6]  = axis.z*axis.y*ic + axis.x*s;
-    r.d[7]  = 0.0f;
-
-    r.d[8]  = axis.x*axis.z*ic + axis.y*s;
-    r.d[9]  = axis.y*axis.z*ic - axis.x*s;
-    r.d[10] = c + axis.z*axis.z*ic;
-    r.d[11] = 0.0f;
-
-    r.d[12] = 0.0f;
-    r.d[13] = 0.0f;
-    r.d[14] = 0.0f;
-    r.d[15] = 1.0f;
-    return r;
-}
-
-m4 m4_mul(m4 a, m4 b)
-{
-    m4 m;
-    for (int col = 0; col < 4; col++)
-    {
-        for (int row = 0; row < 4; row++)
-        {
-            m.d[col * 4 + row] = 0.0f;
-            for (int k = 0; k < 4; k++)
-            {
-                m.d[col * 4 + row] += a.d[k * 4 + row] * b.d[col * 4 + k];
-            }
-        }
-    }
-    return m;
-}
+// --------------------------------------------
 
 m4 m4_look_at(v3 eye, v3 target, v3 up)
 {

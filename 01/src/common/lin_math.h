@@ -73,11 +73,13 @@ static inline v3 v3_scale(v3 v, float s)
 
 m4 m4_identity();
 
+m4 m4_translate(f32 x, f32 y, f32 z);
+m4 m4_rotate(float angle_rad, v3 axis);
+m4 m4_scale(v3 scale);
+
+m4 m4_mul(m4 a, m4 b);
+
 m4 m4_proj_ortho(f32 left, f32 right, f32 bottom, f32 top, f32 near, f32 far);
 m4 m4_proj_perspective(f32 fov, f32 aspect, f32 znear, f32 zfar);
-m4 m4_translate(f32 x, f32 y, f32 z);
-
-m4 m4_rotate(float angle_rad, v3 axis);
-m4 m4_mul(m4 a, m4 b);
 
 m4 m4_look_at(v3 eye, v3 target, v3 up);
