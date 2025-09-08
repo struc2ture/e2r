@@ -14,6 +14,7 @@
 
 #define FRAMES_IN_FLIGHT 2
 #define MAX_VERTEX_COUNT 1024
+#define MAX_INDEX_COUNT 4096
 
 typedef struct Vk_SwapchainBundle
 {
@@ -98,6 +99,9 @@ typedef struct Vk_PipelineBundle
     u32 max_vertex_count;
     Vk_BufferBundle vertex_buffer_bundle;
 
+    u32 max_index_count;
+    Vk_BufferBundle index_buffer_bundle;
+
 } Vk_PipelineBundle;
 
 // ------------------------------------
@@ -117,6 +121,9 @@ typedef struct Vertex3D
     v4 color;
 
 } Vertex3D;
+
+typedef u32 VertIndex;
+#define VERT_INDEX_TYPE VK_INDEX_TYPE_UINT32
 
 typedef struct UBOLayoutGlobal2D
 {
@@ -1061,9 +1068,13 @@ Vk_TextureBundle _vk_load_texture(const char *path)
 
 Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
 {
+    const char *vert_shader_path = "bin/shaders/cubes.vert.spv";
+    const char *frag_shader_path = "bin/shaders/cubes.frag.spv";
+
     Vk_PipelineBundle pipeline_bundle =
     {
-        .max_vertex_count = MAX_VERTEX_COUNT
+        .max_vertex_count = MAX_VERTEX_COUNT,
+        .max_index_count = MAX_INDEX_COUNT
     };
 
     u32 frame_count = FRAMES_IN_FLIGHT;
@@ -1115,8 +1126,13 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
     }
 
     pipeline_bundle.vertex_buffer_bundle = _vk_create_buffer_bundle(
-        pipeline_bundle.max_vertex_count * sizeof(Vertex2D),
+        pipeline_bundle.max_vertex_count * sizeof(Vertex3D),
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
+
+    pipeline_bundle.index_buffer_bundle = _vk_create_buffer_bundle(
+        pipeline_bundle.max_index_count * sizeof(VertIndex),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT
     );
 
     pipeline_bundle.descriptor_set_layout = descriptor_set_layout;
@@ -1132,7 +1148,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
 
         VkDescriptorPoolCreateInfo decriptor_pool_create_info = {};
         decriptor_pool_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        decriptor_pool_create_info.poolSizeCount = 1;
+        decriptor_pool_create_info.poolSizeCount = array_count(descriptor_pool_sizes);
         decriptor_pool_create_info.pPoolSizes = descriptor_pool_sizes;
         decriptor_pool_create_info.maxSets = frame_count;
 
@@ -1194,8 +1210,8 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
 
     VkPipeline pipeline;
     {
-        VkShaderModule vert_shader_module = _vk_create_shader_module("bin/shaders/cubes.vert.spv");
-        VkShaderModule frag_shader_module = _vk_create_shader_module("bin/shaders/cubes.frag.spv");
+        VkShaderModule vert_shader_module = _vk_create_shader_module(vert_shader_path);
+        VkShaderModule frag_shader_module = _vk_create_shader_module(frag_shader_path);
 
         VkPipelineShaderStageCreateInfo shader_stages[2] = {};
         shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -1393,6 +1409,11 @@ void _vk_destroy_pipeline_bundle(Vk_PipelineBundle *bundle)
 {
     _vk_destroy_buffer_bundle(&bundle->vertex_buffer_bundle);
 
+    if (bundle->index_buffer_bundle.buffer != VK_NULL_HANDLE)
+    {
+        _vk_destroy_buffer_bundle(&bundle->index_buffer_bundle);
+    }
+
     // VkResult result = vkFreeDescriptorSets(ctx.vk_device, bundle->descriptor_pool, bundle->descriptor_set_count, bundle->descriptor_sets);
     // if (result != VK_SUCCESS) fatal("Failed to free descriptor sets");
 
@@ -1495,6 +1516,7 @@ void e2r_draw()
         memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
     }
 
+    u32 index_count;
     {
         const Vertex3D verts[] =
         {
@@ -1531,6 +1553,19 @@ void e2r_draw()
         };
 
         memcpy(ctx.vk_cubes_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
+
+        const VertIndex indices[] =
+        {
+            0,  1,  2,  0,  2,  3, // a
+            4,  5,  6,  4,  6,  7, // b
+            8,  9, 10,  8, 10, 11, // c
+            12, 13, 14, 12, 14, 15, // d
+            16, 17, 18, 16, 18, 19, // e
+            20, 21, 22, 20, 22, 23, // f
+        };
+        index_count = array_count(indices);
+
+        memcpy(ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
     }
 
     u32 next_image_index;
@@ -1589,34 +1624,41 @@ void e2r_draw()
     render_pass_begin_info.pClearValues = clear_values;
     vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-    vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_cubes_pipeline_bundle.pipeline);
+    {
+        vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_cubes_pipeline_bundle.pipeline);
 
-    VkDeviceSize offsets[] = {0};
-    vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_cubes_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_cubes_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
 
-    vkCmdBindDescriptorSets(
-        frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.vk_cubes_pipeline_bundle.pipeline_layout,
-        0,
-        1, &ctx.vk_cubes_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
-        0, NULL
-    );
+        vkCmdBindIndexBuffer(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.buffer, 0, VERT_INDEX_TYPE);
 
-    vkCmdDraw(frame->command_buffer, 24, 1, 0, 0 );
+        vkCmdBindDescriptorSets(
+            frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.vk_cubes_pipeline_bundle.pipeline_layout,
+            0,
+            1, &ctx.vk_cubes_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
+            0, NULL
+        );
 
-    vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
+        vkCmdDrawIndexed(frame->command_buffer, index_count, 1, 0, 0, 0);
+    }
 
-    vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
+    {
+        vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
 
-    vkCmdBindDescriptorSets(
-        frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-        ctx.vk_tri_pipeline_bundle.pipeline_layout,
-        0,
-        1, &ctx.vk_tri_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
-        0, NULL
-    );
+        VkDeviceSize offsets[] = {0};
+        vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
 
-    vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
+        vkCmdBindDescriptorSets(
+            frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+            ctx.vk_tri_pipeline_bundle.pipeline_layout,
+            0,
+            1, &ctx.vk_tri_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
+            0, NULL
+        );
+
+        vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
+    }
 
     vkCmdEndRenderPass(frame->command_buffer);
     result = vkEndCommandBuffer(frame->command_buffer);
