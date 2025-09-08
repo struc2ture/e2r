@@ -21,6 +21,19 @@ typedef struct v2i { union { struct { i32 x; i32 y; }; struct { i32 d[2]; }; }; 
 typedef struct v3i { union { struct { i32 x; i32 y; i32 z; }; struct { i32 r; i32 g; i32 b; }; struct { i32 d[3]; }; }; } v3i;
 typedef struct v4i { union { struct { i32 x; i32 y; i32 z; i32 w; }; struct { i32 r; i32 g; i32 b; i32 a; }; struct { i32 d[4]; }; }; } v4i;
 
+/*
+ * Column-major layout in memory
+ * m[col][row]
+ * m[col * 4 + row]
+ * M00 M10 M20 M30
+ * M01 M11 M21 M31
+ * M02 M12 M22 M32
+ * M03 M13 M23 M33
+ * In memory:
+ * M00 M01 M02 M03 M10 M11 ...
+ */
+typedef struct m4 { f32 d[16]; } m4;
+
 static inline v2 V2(f32 x, f32 y) { return (v2){{{x, y}}}; }
 static inline v3 V3(f32 x, f32 y, f32 z) { return (v3){{{x, y, z}}}; }
 static inline v4 V4(f32 x, f32 y, f32 z, f32 w) { return (v4){{{x, y, z, w}}}; }

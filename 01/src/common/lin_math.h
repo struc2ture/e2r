@@ -6,22 +6,6 @@
 
 #define PI32 3.14159265359f
 
-/*
- * Column-major layout in memory
- * m[col][row]
- * m[col * 4 + row]
- * M00 M10 M20 M30
- * M01 M11 M21 M31
- * M02 M12 M22 M32
- * M03 M13 M23 M33
- * In memory:
- * M00 M01 M02 M03 M10 M11 ...
- */
-typedef struct m4
-{
-    f32 d[16];
-} m4;
-
 static inline f32 deg_to_rad(f32 deg)
 {
     f32 rad = deg / 180.0f * PI32;

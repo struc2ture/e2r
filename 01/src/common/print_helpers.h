@@ -1,3 +1,5 @@
+#pragma once
+
 #include "lin_math.h"
 
 void print_m4(m4 m);

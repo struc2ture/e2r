@@ -1,4 +1,5 @@
 #include "e2r_core.h"
+#include "e2r_camera.h"
 
 #include <string.h>
 
@@ -168,6 +169,8 @@ typedef struct E2R_Ctx
 
     Vk_PipelineBundle vk_tri_pipeline_bundle;
     Vk_PipelineBundle vk_cubes_pipeline_bundle;
+
+    E2R_Camera camera;
 
 } E2R_Ctx;
 
@@ -1288,7 +1291,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
         rasterization_state.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
         rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
         rasterization_state.lineWidth = 1.0f;
-        rasterization_state.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterization_state.cullMode = VK_CULL_MODE_NONE;
         rasterization_state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
         VkPipelineMultisampleStateCreateInfo multisample_state = {};
@@ -1462,6 +1465,8 @@ void e2r_init(int width, int height, const char *name)
 
     ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle_tri();
     ctx.vk_cubes_pipeline_bundle = _vk_create_pipeline_bundle_cubes();
+
+    ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
 }
 
 void e2r_destroy()
@@ -1512,8 +1517,57 @@ void e2r_end_frame()
 
 void e2r_draw()
 {
+    const f32 delta = 1 / 120.0f;
+
+    // Update camera based on mouse
+    {
+        static f64 last_mouse_x, last_mouse_y;
+        static f64 mouse_dx_smoothed, mouse_dy_smoothed;
+        static bool first_mouse = true;
+
+        f64 mouse_x, mouse_y;
+        glfwGetCursorPos(ctx.glfw_window, &mouse_x, &mouse_y);
+
+        if (first_mouse)
+        {
+            last_mouse_x = mouse_x;
+            last_mouse_y = mouse_y;
+            first_mouse = false;
+        }
+
+        f64 mouse_dx = mouse_x - last_mouse_x;
+        f64 mouse_dy = mouse_y - last_mouse_y;
+        last_mouse_x = mouse_x;
+        last_mouse_y = mouse_y;
+
+        const f64 factor = 0.3;
+        mouse_dx_smoothed = factor * mouse_dx_smoothed + (1.0 - factor) * mouse_dx;
+        mouse_dy_smoothed = factor * mouse_dy_smoothed + (1.0 - factor) * mouse_dy;
+
+        f32 mouse_sens = 0.2f;
+        ctx.camera.pitch_deg -= mouse_sens * mouse_dy_smoothed;
+        ctx.camera.yaw_deg += mouse_sens * mouse_dx_smoothed;
+        if (ctx.camera.pitch_deg > 89.9f) ctx.camera.pitch_deg = 89.9f;
+        else if (ctx.camera.pitch_deg < -89.9f) ctx.camera.pitch_deg = -89.9f;
+    }
+
+    // Update camera based on keyboard
+    {
+        f32 speed = 3.0f;
+        v3 dir = e2r_camera_get_dir(&ctx.camera);
+        v3 right = e2r_camera_get_right(&ctx.camera);
+        v3 up = e2r_camera_get_up(&ctx.camera);
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_W) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(dir, speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_S) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(dir, -speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_A) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(right, speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_D) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(right, -speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_SPACE) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(up, speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(up, -speed * delta));
+    }
+
     const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
 
+    // Tri pipeline data
     {
         const Vertex2D verts[] =
         {
@@ -1525,6 +1579,7 @@ void e2r_draw()
         memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
     }
 
+    // Cubes pipeline data
     u32 index_count;
     {
         const Vertex3D verts[] =
@@ -1577,6 +1632,33 @@ void e2r_draw()
         memcpy(ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
     }
 
+    // Global 2D and 3D uniforms
+    v2 window_dim = _glfw_get_window_size();
+
+    m4 ortho_proj = m4_proj_ortho(0.0f, window_dim.x, 0.0f, window_dim.y, -1.0f, 1.0f);
+
+    {
+        UBOLayoutGlobal2D ubo_data =
+        {
+            .proj = ortho_proj
+        };
+        memcpy(ctx.global_ubo_2d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
+    }
+
+    m4 camera_view = e2r_camera_get_view(&ctx.camera);
+    m4 perspective_proj = m4_proj_perspective(deg_to_rad(60), window_dim.x / window_dim.y, 0.1f, 100.0f);
+    m4 view_proj = m4_mul(perspective_proj, camera_view);
+
+    {
+        UBOLayoutGlobal3D ubo_data =
+        {
+            .model = m4_identity(),
+            .view_proj = view_proj
+        };
+
+        memcpy(ctx.global_ubo_3d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
+    }
+
     u32 next_image_index;
     VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->acquire_semaphore, VK_NULL_HANDLE, &next_image_index);
     if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
@@ -1585,33 +1667,6 @@ void e2r_draw()
         // continue;
     }
     else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
-
-    v2 window_dim = _glfw_get_window_size();
-    {
-        UBOLayoutGlobal2D ubo_data =
-        {
-            .proj = m4_proj_ortho(
-                0.0f, window_dim.x,
-                0.0f, window_dim.y,
-                -1.0f, 1.0f
-            )
-        };
-        memcpy(ctx.global_ubo_2d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
-    }
-
-    {
-        UBOLayoutGlobal3D ubo_data =
-        {
-            .model = m4_translate(0.0f, 0.0f, -5.0f),
-            .view_proj = m4_proj_perspective(
-                deg_to_rad(60),
-                window_dim.x / window_dim.y,
-                0.1f, 100.0f
-            )
-        };
-
-        memcpy(ctx.global_ubo_3d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
-    }
 
     result = vkResetCommandBuffer(frame->command_buffer, 0);
     if (result != VK_SUCCESS) fatal("Failed to reset command buffer");
