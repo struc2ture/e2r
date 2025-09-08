@@ -26,5 +26,5 @@ bin/shaders/tri.frag.spv: src/shaders/tri.frag
 bin/shaders/cubes.vert.spv: src/shaders/cubes.vert
 	glslc $< -o $@
 
-bin/shaders/cubes.frag.spv: src/shaders/tri.frag
+bin/shaders/cubes.frag.spv: src/shaders/cubes.frag
 	glslc $< -o $@

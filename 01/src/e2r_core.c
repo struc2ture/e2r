@@ -9,6 +9,7 @@
 #include <vulkan/vulkan_core.h>
 
 #include "common/lin_math.h"
+#include "common/print_helpers.h"
 #include "common/types.h"
 #include "common/util.h"
 
@@ -178,7 +179,15 @@ GLFWwindow *_glfw_create_window(int width, int height, const char *window_name)
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     glfwWindowHint(GLFW_RESIZABLE, GLFW_TRUE);
     GLFWwindow *window = glfwCreateWindow(width, height, window_name, NULL, NULL);
+    ctx.glfw_window = window;
     return window;
+}
+
+v2 _glfw_get_window_size()
+{
+    int w, h;
+    glfwGetWindowSize(ctx.glfw_window, &w, &h);
+    return V2(w, h);
 }
 
 VkInstance _vk_create_instance()
@@ -1577,12 +1586,13 @@ void e2r_draw()
     }
     else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
 
+    v2 window_dim = _glfw_get_window_size();
     {
         UBOLayoutGlobal2D ubo_data =
         {
             .proj = m4_proj_ortho(
-                0.0f, (f32)ctx.vk_swapchain_bundle.extent.width,
-                0.0f, (f32)ctx.vk_swapchain_bundle.extent.height,
+                0.0f, window_dim.x,
+                0.0f, window_dim.y,
                 -1.0f, 1.0f
             )
         };
@@ -1592,12 +1602,14 @@ void e2r_draw()
     {
         UBOLayoutGlobal3D ubo_data =
         {
+            .model = m4_translate(0.0f, 0.0f, -5.0f),
             .view_proj = m4_proj_perspective(
                 deg_to_rad(60),
-                (f32)ctx.vk_swapchain_bundle.extent.width / ctx.vk_swapchain_bundle.extent.height,
+                window_dim.x / window_dim.y,
                 0.1f, 100.0f
             )
         };
+
         memcpy(ctx.global_ubo_3d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
     }
 
