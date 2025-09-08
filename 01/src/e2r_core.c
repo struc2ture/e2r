@@ -46,7 +46,7 @@ typedef struct Vk_DepthImageBundle
 
 } Vk_DepthImageBundle;
 
-typedef struct Vk_RenderTargetGroup
+typedef struct Vk_RenderPassBundle
 {
     VkRenderPass render_pass;
     Vk_RenderTarget *render_targets;
@@ -54,7 +54,7 @@ typedef struct Vk_RenderTargetGroup
     VkFormat color_format;
     VkFormat depth_format;
 
-} Vk_RenderTargetGroup;
+} Vk_RenderPassBundle;
 
 typedef struct Vk_BufferBundle
 {
@@ -163,11 +163,12 @@ typedef struct E2R_Ctx
     VkQueue vk_queue;
 
     Vk_SwapchainBundle vk_swapchain_bundle;
-
     Vk_DepthImageBundle vk_depth_image_bundle;
+    Vk_RenderPassBundle vk_clear_render_pass_bundle;
+    Vk_RenderPassBundle vk_2d_render_pass_bundle;
+    Vk_RenderPassBundle vk_3d_render_pass_bundle;
+    Vk_RenderPassBundle vk_final_render_pass_bundle;
 
-    Vk_RenderTargetGroup vk_render_target_group;
-    
     VkCommandPool vk_command_pool;
 
     Vk_FrameList vk_frame_list;
@@ -482,12 +483,13 @@ Vk_DepthImageBundle _vk_create_depth_image_bundle()
     return depth_image_bundle;
 }
 
-Vk_RenderTargetGroup _vk_create_render_target_group()
+Vk_RenderPassBundle _vk_create_render_pass_bundle(const Vk_DepthImageBundle *depth_image_bundle, bool with_clear, bool is_final)
 {
-    Vk_RenderTargetGroup render_target_group =
+    bool with_depth = (depth_image_bundle != NULL);
+    Vk_RenderPassBundle render_pass_bundle =
     {
         .color_format = ctx.vk_swapchain_bundle.format.format,
-        .depth_format = ctx.vk_depth_image_bundle.depth_format,
+        .depth_format = with_depth ? depth_image_bundle->depth_format : VK_FORMAT_UNDEFINED,
         .render_target_count = ctx.vk_swapchain_bundle.image_count
     };
 
@@ -496,19 +498,19 @@ Vk_RenderTargetGroup _vk_create_render_target_group()
     VkRenderPass render_pass;
     {
         VkAttachmentDescription color_attachment_description = {};
-        color_attachment_description.format = render_target_group.color_format;
+        color_attachment_description.format = render_pass_bundle.color_format;
         color_attachment_description.samples = VK_SAMPLE_COUNT_1_BIT;
-        color_attachment_description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        color_attachment_description.loadOp = with_clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
         color_attachment_description.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        color_attachment_description.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        color_attachment_description.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+        color_attachment_description.initialLayout = with_clear ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        color_attachment_description.finalLayout = is_final ? VK_IMAGE_LAYOUT_PRESENT_SRC_KHR : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkAttachmentReference color_attachment_reference = {};
         color_attachment_reference.attachment = 0;
         color_attachment_reference.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
         VkAttachmentDescription depth_attachment_description = {};
-        depth_attachment_description.format = render_target_group.depth_format;
+        depth_attachment_description.format = render_pass_bundle.depth_format;
         depth_attachment_description.samples = VK_SAMPLE_COUNT_1_BIT;
         depth_attachment_description.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depth_attachment_description.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -525,24 +527,35 @@ Vk_RenderTargetGroup _vk_create_render_target_group()
         subpass_description.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
         subpass_description.colorAttachmentCount = 1;
         subpass_description.pColorAttachments = &color_attachment_reference;
-        subpass_description.pDepthStencilAttachment = &depth_attachment_reference;
+        if (with_depth)
+        {
+            subpass_description.pDepthStencilAttachment = &depth_attachment_reference;
+        }
 
-        VkAttachmentDescription render_pass_attachments[] = { color_attachment_description, depth_attachment_description };
         VkRenderPassCreateInfo render_pass_create_info = {};
         render_pass_create_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-        render_pass_create_info.attachmentCount = array_count(render_pass_attachments);
-        render_pass_create_info.pAttachments = render_pass_attachments;
         render_pass_create_info.subpassCount = 1;
         render_pass_create_info.pSubpasses = &subpass_description;
+        if (with_depth)
+        {
+            VkAttachmentDescription render_pass_attachments[] = { color_attachment_description, depth_attachment_description };
+            render_pass_create_info.attachmentCount = array_count(render_pass_attachments);
+            render_pass_create_info.pAttachments = render_pass_attachments;
+        }
+        else
+        {
+            render_pass_create_info.attachmentCount = 1;
+            render_pass_create_info.pAttachments = &color_attachment_description;
+        }
 
         result = vkCreateRenderPass(ctx.vk_device, &render_pass_create_info, NULL, &render_pass);
         if (result != VK_SUCCESS) fatal("Failed to create render pass");
     }
-    render_target_group.render_pass = render_pass;
+    render_pass_bundle.render_pass = render_pass;
 
-    Vk_RenderTarget *render_targets = xmalloc(render_target_group.render_target_count * sizeof(render_targets[0]));
+    Vk_RenderTarget *render_targets = xmalloc(render_pass_bundle.render_target_count * sizeof(render_targets[0]));
     {
-        for (u32 i = 0; i < render_target_group.render_target_count; i++)
+        for (u32 i = 0; i < render_pass_bundle.render_target_count; i++)
         {
             VkImageView color_view;
             {
@@ -550,7 +563,7 @@ Vk_RenderTargetGroup _vk_create_render_target_group()
                 create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
                 create_info.image = ctx.vk_swapchain_bundle.images[i];
                 create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                create_info.format = render_target_group.color_format;
+                create_info.format = render_pass_bundle.color_format;
                 create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
                 create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
                 create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
@@ -565,14 +578,14 @@ Vk_RenderTargetGroup _vk_create_render_target_group()
                 if (result != VK_SUCCESS) fatal("Failed to create image view");
             }
 
-
-            VkImageView depth_view;
+            VkImageView depth_view = VK_NULL_HANDLE;
+            if (with_depth)
             {
                 VkImageViewCreateInfo create_info = {};
                 create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
                 create_info.image = ctx.vk_depth_image_bundle.images[i];
                 create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                create_info.format = render_target_group.depth_format;
+                create_info.format = render_pass_bundle.depth_format;
                 create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
                 create_info.subresourceRange.baseMipLevel = 0;
                 create_info.subresourceRange.levelCount = 1;
@@ -585,16 +598,24 @@ Vk_RenderTargetGroup _vk_create_render_target_group()
 
             VkFramebuffer framebuffer;
             {
-                VkImageView attachments[] = { color_view, depth_view };
-
                 VkFramebufferCreateInfo create_info = {};
                 create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
                 create_info.renderPass = render_pass;
-                create_info.attachmentCount = array_count(attachments);
-                create_info.pAttachments = attachments;
                 create_info.width = ctx.vk_swapchain_bundle.extent.width;
                 create_info.height = ctx.vk_swapchain_bundle.extent.height;
                 create_info.layers = 1;
+
+                if (with_depth)
+                {
+                    VkImageView attachments[] = { color_view, depth_view };
+                    create_info.attachmentCount = array_count(attachments);
+                    create_info.pAttachments = attachments;
+                }
+                else
+                {
+                    create_info.attachmentCount = 1;
+                    create_info.pAttachments = &color_view;
+                }
 
                 result = vkCreateFramebuffer(ctx.vk_device, &create_info, NULL, &framebuffer);
                 if (result != VK_SUCCESS) fatal("Failed to create framebuffer");
@@ -605,9 +626,9 @@ Vk_RenderTargetGroup _vk_create_render_target_group()
             render_targets[i].framebuffer = framebuffer;
         }
     }
-    render_target_group.render_targets = render_targets;
+    render_pass_bundle.render_targets = render_targets;
 
-    return render_target_group;
+    return render_pass_bundle;
 }
 
 VkCommandPool _vk_create_command_pool()
@@ -944,7 +965,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_tri()
     graphics_pipeline_create_info.pMultisampleState = &pipeline_multisample_state_create_info;
     graphics_pipeline_create_info.pColorBlendState = &pipeline_color_blend_state_create_info;
     graphics_pipeline_create_info.layout = pipeline_layout;
-    graphics_pipeline_create_info.renderPass = ctx.vk_render_target_group.render_pass;
+    graphics_pipeline_create_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
     graphics_pipeline_create_info.subpass = 0;
     
     VkPipeline pipeline;
@@ -1427,7 +1448,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
         create_info.pColorBlendState = &color_blend_state;
         create_info.pDepthStencilState = &depth_stencil_state;
         create_info.layout = pipeline_layout;
-        create_info.renderPass = ctx.vk_render_target_group.render_pass;
+        create_info.renderPass = ctx.vk_3d_render_pass_bundle.render_pass;
         create_info.subpass = 0;
         
         result = vkCreateGraphicsPipelines(ctx.vk_device, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline);
@@ -1469,16 +1490,19 @@ void _vk_destroy_depth_image_bundle(Vk_DepthImageBundle *bundle)
     *bundle = (Vk_DepthImageBundle){};
 }
 
-void _vk_destroy_render_target_group(Vk_RenderTargetGroup *group)
+void _vk_destroy_render_pass_bundle(Vk_RenderPassBundle *bundle)
 {
-    for (u32 i = 0; i < group->render_target_count; i++)
+    for (u32 i = 0; i < bundle->render_target_count; i++)
     {
-        vkDestroyImageView(ctx.vk_device, group->render_targets[i].color_view, NULL);
-        vkDestroyImageView(ctx.vk_device, group->render_targets[i].depth_view, NULL);
-        vkDestroyFramebuffer(ctx.vk_device, group->render_targets[i].framebuffer, NULL);
+        vkDestroyImageView(ctx.vk_device, bundle->render_targets[i].color_view, NULL);
+        if (bundle->depth_format != VK_FORMAT_UNDEFINED)
+        {
+            vkDestroyImageView(ctx.vk_device, bundle->render_targets[i].depth_view, NULL);
+        }
+        vkDestroyFramebuffer(ctx.vk_device, bundle->render_targets[i].framebuffer, NULL);
     }
-    vkDestroyRenderPass(ctx.vk_device, group->render_pass, NULL);
-    *group = (Vk_RenderTargetGroup){};
+    vkDestroyRenderPass(ctx.vk_device, bundle->render_pass, NULL);
+    *bundle = (Vk_RenderPassBundle){};
 }
 
 void _vk_destroy_command_pool(VkCommandPool *command_pool)
@@ -1564,7 +1588,10 @@ void e2r_init(int width, int height, const char *name)
 
     ctx.vk_swapchain_bundle = _vk_create_swapchain_bundle();
     ctx.vk_depth_image_bundle = _vk_create_depth_image_bundle();
-    ctx.vk_render_target_group = _vk_create_render_target_group();
+    ctx.vk_clear_render_pass_bundle = _vk_create_render_pass_bundle(NULL, true, false);
+    ctx.vk_2d_render_pass_bundle = _vk_create_render_pass_bundle(NULL, false, false);
+    ctx.vk_3d_render_pass_bundle = _vk_create_render_pass_bundle(&ctx.vk_depth_image_bundle, false, false);
+    ctx.vk_final_render_pass_bundle = _vk_create_render_pass_bundle(NULL, false, true);
     ctx.vk_command_pool = _vk_create_command_pool();
 
     ctx.vk_frame_list = _vk_create_frame_list();
@@ -1595,7 +1622,12 @@ void e2r_destroy()
     _vk_destroy_frame_list(&ctx.vk_frame_list);
 
     _vk_destroy_command_pool(&ctx.vk_command_pool);
-    _vk_destroy_render_target_group(&ctx.vk_render_target_group);
+
+    _vk_destroy_render_pass_bundle(&ctx.vk_clear_render_pass_bundle);
+    _vk_destroy_render_pass_bundle(&ctx.vk_2d_render_pass_bundle);
+    _vk_destroy_render_pass_bundle(&ctx.vk_3d_render_pass_bundle);
+    _vk_destroy_render_pass_bundle(&ctx.vk_final_render_pass_bundle);
+
     _vk_destroy_depth_image_bundle(&ctx.vk_depth_image_bundle);
     _vk_destroy_swapchain_bundle(&ctx.vk_swapchain_bundle);
 
@@ -1787,22 +1819,44 @@ void e2r_draw()
     result = vkBeginCommandBuffer(frame->command_buffer, &command_buffer_begin_info);
     if (result != VK_SUCCESS) fatal("Failed to begin command buffer");
 
-    VkClearValue clear_values[2] = {};
-    clear_values[0].color = (VkClearColorValue){{1.0f, 1.0f, 0.0f, 1.0f}};
-    clear_values[1].depthStencil = (VkClearDepthStencilValue){1.0f, 0};
-    VkRect2D render_area = {};
-    render_area.offset = (VkOffset2D){0, 0};
-    render_area.extent = ctx.vk_swapchain_bundle.extent;
-    VkRenderPassBeginInfo render_pass_begin_info = {};
-    render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-    render_pass_begin_info.renderPass = ctx.vk_render_target_group.render_pass;
-    render_pass_begin_info.framebuffer = ctx.vk_render_target_group.render_targets[next_image_index].framebuffer;
-    render_pass_begin_info.renderArea = render_area;
-    render_pass_begin_info.clearValueCount = array_count(clear_values);
-    render_pass_begin_info.pClearValues = clear_values;
-    vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-
+    // Clear Render pass
     {
+        VkClearValue clear_values[] = {
+            [0].color = (VkClearColorValue){{1.0f, 1.0f, 0.0f, 1.0f}},
+            [1].depthStencil = (VkClearDepthStencilValue){1.0f, 0}
+        };
+        VkRect2D render_area = {};
+        render_area.offset = (VkOffset2D){0, 0};
+        render_area.extent = ctx.vk_swapchain_bundle.extent;
+        VkRenderPassBeginInfo render_pass_begin_info = {};
+        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_begin_info.renderPass = ctx.vk_clear_render_pass_bundle.render_pass;
+        render_pass_begin_info.framebuffer = ctx.vk_clear_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.renderArea = render_area;
+        render_pass_begin_info.clearValueCount = array_count(clear_values);
+        render_pass_begin_info.pClearValues = clear_values;
+        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdEndRenderPass(frame->command_buffer);
+    }
+
+    // 3D Render pass
+    {
+        VkClearValue clear_values[] = {
+            [0].color = {},
+            [1].depthStencil = (VkClearDepthStencilValue){1.0f, 0}
+        };
+        VkRect2D render_area = {};
+        render_area.offset = (VkOffset2D){0, 0};
+        render_area.extent = ctx.vk_swapchain_bundle.extent;
+        VkRenderPassBeginInfo render_pass_begin_info = {};
+        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_begin_info.renderPass = ctx.vk_3d_render_pass_bundle.render_pass;
+        render_pass_begin_info.framebuffer = ctx.vk_3d_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.renderArea = render_area;
+        render_pass_begin_info.clearValueCount = array_count(clear_values);
+        render_pass_begin_info.pClearValues = clear_values;
+        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
         vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_cubes_pipeline_bundle.pipeline);
 
         VkDeviceSize offsets[] = {0};
@@ -1819,9 +1873,23 @@ void e2r_draw()
         );
 
         vkCmdDrawIndexed(frame->command_buffer, index_count, 1, 0, 0, 0);
+
+        vkCmdEndRenderPass(frame->command_buffer);
     }
 
+    // 2D Render pass
     {
+        VkRect2D render_area = {};
+        render_area.offset = (VkOffset2D){0, 0};
+        render_area.extent = ctx.vk_swapchain_bundle.extent;
+        VkRenderPassBeginInfo render_pass_begin_info = {};
+        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_begin_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
+        render_pass_begin_info.framebuffer = ctx.vk_2d_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.renderArea = render_area;
+        render_pass_begin_info.clearValueCount = 0;
+        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
         vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
 
         VkDeviceSize offsets[] = {0};
@@ -1836,9 +1904,25 @@ void e2r_draw()
         );
 
         vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
+
+        vkCmdEndRenderPass(frame->command_buffer);
     }
 
-    vkCmdEndRenderPass(frame->command_buffer);
+    // Final Render pass
+    {
+        VkRect2D render_area = {};
+        render_area.offset = (VkOffset2D){0, 0};
+        render_area.extent = ctx.vk_swapchain_bundle.extent;
+        VkRenderPassBeginInfo render_pass_begin_info = {};
+        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        render_pass_begin_info.renderPass = ctx.vk_final_render_pass_bundle.render_pass;
+        render_pass_begin_info.framebuffer = ctx.vk_final_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.renderArea = render_area;
+        render_pass_begin_info.clearValueCount = 0;
+        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+        vkCmdEndRenderPass(frame->command_buffer);
+    }
+
     result = vkEndCommandBuffer(frame->command_buffer);
     if (result != VK_SUCCESS) fatal("Failed to end command buffer");
 
