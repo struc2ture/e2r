@@ -91,6 +91,7 @@ typedef struct Vk_TextureBundle
     VkDeviceMemory memory;
     VkImageView image_view;
     VkSampler sampler;
+    VkFormat format;
 
 } Vk_TextureBundle;
 
@@ -199,9 +200,11 @@ typedef struct E2R_Ctx
 
     Vk_TextureBundle ducks_texture;
     Vk_TextureBundle ui_atlas_texture;
+    Vk_TextureBundle font_atlas_texture;
 
     Vk_PipelineBundle vk_tri_pipeline_bundle;
     Vk_PipelineBundle vk_ui_pipeline_bundle;
+    Vk_PipelineBundle vk_text_pipeline_bundle;
     Vk_PipelineBundle vk_cubes_pipeline_bundle;
 
     bool rebuild_swapchain;
@@ -843,20 +846,13 @@ Vk_BufferBundleList _vk_create_buffer_bundle_list(VkDeviceSize max_size, VkBuffe
 
 void _vk_destroy_buffer_bundle(Vk_BufferBundle *bundle);
 
-Vk_TextureBundle _vk_load_texture(const char *path)
+Vk_TextureBundle _vk_load_texture_from_pixels(void *pixels, u32 w, u32 h, VkDeviceSize image_size, VkFormat format)
 {
-    int tex_w, tex_h, tex_ch;
-    stbi_set_flip_vertically_on_load(true);
-    stbi_uc *pixels = stbi_load(path, &tex_w, &tex_h, &tex_ch, STBI_rgb_alpha);
-    VkDeviceSize image_size = tex_w * tex_h * 4; // 4 bytes per pixel
-
     VkResult result;
 
     Vk_BufferBundle texture_staging_buffer = _vk_create_buffer_bundle(image_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
     memcpy(texture_staging_buffer.data_ptr, pixels, (size_t)image_size);
-
-    free(pixels);
 
     // Create image for the texture
     VkImage texture_image;
@@ -864,8 +860,8 @@ Vk_TextureBundle _vk_load_texture(const char *path)
         VkImageCreateInfo texture_image_create_info = {};
         texture_image_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
         texture_image_create_info.imageType = VK_IMAGE_TYPE_2D;
-        texture_image_create_info.format = VK_FORMAT_R8G8B8A8_UNORM;
-        texture_image_create_info.extent = (VkExtent3D){ (u32)tex_w, (u32)tex_h, 1 };
+        texture_image_create_info.format = format;
+        texture_image_create_info.extent = (VkExtent3D){ w, h, 1 };
         texture_image_create_info.mipLevels = 1;
         texture_image_create_info.arrayLayers = 1;
         texture_image_create_info.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -955,7 +951,7 @@ Vk_TextureBundle _vk_load_texture(const char *path)
             buffer_image_copy.imageSubresource.baseArrayLayer = 0;
             buffer_image_copy.imageSubresource.layerCount = 1;
             buffer_image_copy.imageOffset = (VkOffset3D){0, 0, 0};
-            buffer_image_copy.imageExtent = (VkExtent3D){(u32)tex_w, (u32)tex_h, 1};
+            buffer_image_copy.imageExtent = (VkExtent3D){w, h, 1};
 
             vkCmdCopyBufferToImage(
                 command_buffer,
@@ -1016,7 +1012,7 @@ Vk_TextureBundle _vk_load_texture(const char *path)
         texture_image_view_create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
         texture_image_view_create_info.image = texture_image;
         texture_image_view_create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        texture_image_view_create_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+        texture_image_view_create_info.format = format;
         texture_image_view_create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
         texture_image_view_create_info.subresourceRange.baseMipLevel = 0;
         texture_image_view_create_info.subresourceRange.levelCount = 1;
@@ -1051,8 +1047,33 @@ Vk_TextureBundle _vk_load_texture(const char *path)
         .image = texture_image,
         .memory = texture_image_memory,
         .image_view = texture_image_view,
-        .sampler = texture_sampler
+        .sampler = texture_sampler,
+        .format = format
     };
+}
+
+Vk_TextureBundle _vk_load_texture(const char *path)
+{
+    int tex_w, tex_h, tex_ch;
+    stbi_set_flip_vertically_on_load(true);
+    stbi_uc *pixels = stbi_load(path, &tex_w, &tex_h, &tex_ch, STBI_rgb_alpha);
+    VkDeviceSize image_size = tex_w * tex_h * 4; // 4 bytes per pixel
+
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
+
+    Vk_TextureBundle texture_bundle = _vk_load_texture_from_pixels(pixels, tex_w, tex_h, image_size, format);
+
+    free(pixels);
+
+    return texture_bundle;
+}
+
+Vk_TextureBundle _vk_load_texture_from_font_atlas(const FontAtlas *atlas)
+{
+    VkDeviceSize image_size = atlas->width * atlas->height; // 1 bytes per pixel
+    VkFormat format = VK_FORMAT_R8_UNORM;
+    Vk_TextureBundle texture_bundle = _vk_load_texture_from_pixels(atlas->pixels, atlas->width, atlas->height, image_size, format);
+    return texture_bundle;
 }
 
 Vk_PipelineBundle _vk_create_pipeline_bundle_tri()
@@ -1399,6 +1420,268 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
             descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
             descriptor_image_info.imageView = ctx.ui_atlas_texture.image_view;
             descriptor_image_info.sampler = ctx.ui_atlas_texture.sampler;
+
+            VkWriteDescriptorSet write_descriptor_set = {};
+            write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write_descriptor_set.dstSet = descriptor_sets[i];
+            write_descriptor_set.dstBinding = 1;
+            write_descriptor_set.dstArrayElement = 0;
+            write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            write_descriptor_set.descriptorCount = 1;
+            write_descriptor_set.pImageInfo = &descriptor_image_info;
+
+            vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
+        }
+    }
+
+    pipeline_bundle.descriptor_pool = descriptor_pool;
+    pipeline_bundle.descriptor_sets = descriptor_sets;
+    pipeline_bundle.descriptor_set_count = frame_count;
+
+    VkPipeline pipeline;
+    {
+        VkShaderModule vert_shader_module = _vk_create_shader_module(vert_shader_path);
+        VkShaderModule frag_shader_module = _vk_create_shader_module(frag_shader_path);
+
+        VkPipelineShaderStageCreateInfo shader_stages[2] = {};
+        shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+        shader_stages[0].module = vert_shader_module;
+        shader_stages[0].pName = "main";
+        shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        shader_stages[1].module = frag_shader_module;
+        shader_stages[1].pName = "main";
+
+        VkVertexInputBindingDescription vertex_input_binding_description = {};
+        vertex_input_binding_description.binding = 0;
+        vertex_input_binding_description.stride = sizeof(VertexUI);
+        vertex_input_binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        int vert_attrib_count = 3;
+        VkVertexInputAttributeDescription *vertex_input_attribute_descriptions = xmalloc(vert_attrib_count * sizeof(vertex_input_attribute_descriptions[0]));
+        vertex_input_attribute_descriptions[0] = (VkVertexInputAttributeDescription){
+            .location = 0,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32_SFLOAT,
+            .offset = offsetof(VertexUI, pos)
+        };
+        vertex_input_attribute_descriptions[1] = (VkVertexInputAttributeDescription){
+            .location = 1,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(VertexUI, uv)
+        };
+        vertex_input_attribute_descriptions[2] = (VkVertexInputAttributeDescription){
+            .location = 2,
+            .binding = 0,
+            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+            .offset = offsetof(VertexUI, color)
+        };
+
+        VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
+        vertex_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+        vertex_input_state.vertexBindingDescriptionCount = 1;
+        vertex_input_state.pVertexBindingDescriptions = &vertex_input_binding_description;
+        vertex_input_state.vertexAttributeDescriptionCount = vert_attrib_count;
+        vertex_input_state.pVertexAttributeDescriptions = vertex_input_attribute_descriptions;
+
+        VkPipelineInputAssemblyStateCreateInfo input_assembly_state = {};
+        input_assembly_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+        input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+
+        VkViewport viewport = {0, 0, (float)ctx.vk_swapchain_bundle.extent.width, (float)ctx.vk_swapchain_bundle.extent.height, 0.0f, 1.0f};
+        VkRect2D scissor = {{0, 0}, {ctx.vk_swapchain_bundle.extent.width, ctx.vk_swapchain_bundle.extent.height}};
+        VkPipelineViewportStateCreateInfo viewport_state = {};
+        viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+        viewport_state.viewportCount = 1;
+        viewport_state.pViewports = &viewport;
+        viewport_state.scissorCount = 1;
+        viewport_state.pScissors = &scissor;
+
+        VkPipelineRasterizationStateCreateInfo rasterization_state = {};
+        rasterization_state.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+        rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterization_state.lineWidth = 1.0f;
+        rasterization_state.cullMode = VK_CULL_MODE_NONE;
+        rasterization_state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+
+        VkPipelineMultisampleStateCreateInfo multisample_state = {};
+        multisample_state.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+        multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineColorBlendAttachmentState color_blend_attachment = {};
+        color_blend_attachment.colorWriteMask = (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+        color_blend_attachment.blendEnable = VK_TRUE;
+        color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
+
+        VkPipelineColorBlendStateCreateInfo color_blend_state = {};
+        color_blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+        color_blend_state.attachmentCount = 1;
+        color_blend_state.pAttachments = &color_blend_attachment;
+
+        VkGraphicsPipelineCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        create_info.stageCount = array_count(shader_stages);
+        create_info.pStages = shader_stages;
+        create_info.pVertexInputState = &vertex_input_state;
+        create_info.pInputAssemblyState = &input_assembly_state;
+        create_info.pViewportState = &viewport_state;
+        create_info.pRasterizationState = &rasterization_state;
+        create_info.pMultisampleState = &multisample_state;
+        create_info.pColorBlendState = &color_blend_state;
+        create_info.layout = pipeline_layout;
+        create_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
+        create_info.subpass = 0;
+        
+        result = vkCreateGraphicsPipelines(ctx.vk_device, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline);
+        if (result != VK_SUCCESS) fatal("Failed to create graphics pipeline");
+
+        free(vertex_input_attribute_descriptions);
+
+        vkDestroyShaderModule(ctx.vk_device, vert_shader_module, NULL);
+        vkDestroyShaderModule(ctx.vk_device, frag_shader_module, NULL);
+    }
+
+    pipeline_bundle.pipeline = pipeline;
+
+    return pipeline_bundle;
+}
+
+Vk_PipelineBundle _vk_create_pipeline_bundle_text()
+{
+    const char *vert_shader_path = "bin/shaders/text.vert.spv";
+    const char *frag_shader_path = "bin/shaders/text.frag.spv";
+
+    Vk_PipelineBundle pipeline_bundle =
+    {
+        .max_vertex_count = MAX_VERTEX_COUNT,
+        .max_index_count = MAX_INDEX_COUNT
+    };
+
+    u32 frame_count = FRAMES_IN_FLIGHT;
+
+    VkResult result;
+
+    const u32 ubo_count = 1;
+    VkDescriptorSetLayout descriptor_set_layout;
+    {
+        // Global 2D UBO
+        VkDescriptorSetLayoutBinding descriptor_set_layout_binding_0 = {};
+        descriptor_set_layout_binding_0.binding = 0;
+        descriptor_set_layout_binding_0.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptor_set_layout_binding_0.descriptorCount = 1;
+        descriptor_set_layout_binding_0.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        // Texture Sampler
+        VkDescriptorSetLayoutBinding descriptor_set_layout_binding_1 = {};
+        descriptor_set_layout_binding_1.binding = 1;
+        descriptor_set_layout_binding_1.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_set_layout_binding_1.descriptorCount = 1;
+        descriptor_set_layout_binding_1.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] =
+        {
+            descriptor_set_layout_binding_0,
+            descriptor_set_layout_binding_1
+        };
+        VkDescriptorSetLayoutCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+        create_info.bindingCount = array_count(descriptor_set_layout_bindings);
+        create_info.pBindings = descriptor_set_layout_bindings;
+
+        result = vkCreateDescriptorSetLayout(ctx.vk_device, &create_info, NULL, &descriptor_set_layout);
+        if (result != VK_SUCCESS) fatal("Failed to create descriptor set layout");
+    }
+
+    VkPipelineLayout pipeline_layout;
+    {
+        VkPipelineLayoutCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+        create_info.setLayoutCount = 1;
+        create_info.pSetLayouts = &descriptor_set_layout;
+
+        result = vkCreatePipelineLayout(ctx.vk_device, &create_info, NULL, &pipeline_layout);
+        if (result != VK_SUCCESS) fatal("Failed to create pipeline layout");
+    }
+
+    pipeline_bundle.vertex_buffer_bundle = _vk_create_buffer_bundle(
+        pipeline_bundle.max_vertex_count * sizeof(Vertex2D),
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+    );
+
+    pipeline_bundle.index_buffer_bundle = _vk_create_buffer_bundle(
+        pipeline_bundle.max_index_count * sizeof(VertIndex),
+        VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+    );
+
+    pipeline_bundle.descriptor_set_layout = descriptor_set_layout;
+    pipeline_bundle.pipeline_layout = pipeline_layout;
+
+    VkDescriptorPool descriptor_pool;
+    {
+        VkDescriptorPoolSize descriptor_pool_sizes[2] = {};
+        descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptor_pool_sizes[0].descriptorCount = frame_count * ubo_count;
+        descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_pool_sizes[1].descriptorCount = 1;
+
+        VkDescriptorPoolCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+        create_info.poolSizeCount = array_count(descriptor_pool_sizes);
+        create_info.pPoolSizes = descriptor_pool_sizes;
+        create_info.maxSets = frame_count;
+
+        result = vkCreateDescriptorPool(ctx.vk_device, &create_info, NULL, &descriptor_pool);
+        if (result != VK_SUCCESS) fatal("Failed to create descriptor pool");
+    }
+
+    VkDescriptorSet *descriptor_sets = xmalloc(frame_count * sizeof(descriptor_sets[0]));
+    for (u32 i = 0; i < frame_count; i++)
+    {
+        // Allocate descriptor set
+        {
+            VkDescriptorSetAllocateInfo allocate_info = {};
+            allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+            allocate_info.descriptorPool = descriptor_pool;
+            allocate_info.descriptorSetCount = 1;
+            allocate_info.pSetLayouts = &descriptor_set_layout;
+
+            result = vkAllocateDescriptorSets(ctx.vk_device, &allocate_info, &descriptor_sets[i]);
+            if (result != VK_SUCCESS) fatal("Failed to allocate descriptor set");
+        }
+
+        // Update descriptor set: 2D UBO
+        {
+            const Vk_BufferBundle *buffer_bundle = &ctx.global_ubo_2d.buffer_bundles[i];
+            VkDescriptorBufferInfo descriptor_buffer_info = {};
+            descriptor_buffer_info.buffer = buffer_bundle->buffer;
+            descriptor_buffer_info.offset = 0;
+            descriptor_buffer_info.range = buffer_bundle->size;
+
+            VkWriteDescriptorSet write_descriptor_set = {};
+            write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write_descriptor_set.dstSet = descriptor_sets[i];
+            write_descriptor_set.dstBinding = 0;
+            write_descriptor_set.dstArrayElement = 0;
+            write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            write_descriptor_set.descriptorCount = 1;
+            write_descriptor_set.pBufferInfo = &descriptor_buffer_info;
+
+            vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
+        }
+
+        // Update descriptor set: texture sampler
+        {
+            VkDescriptorImageInfo descriptor_image_info = {};
+            descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            descriptor_image_info.imageView = ctx.font_atlas_texture.image_view;
+            descriptor_image_info.sampler = ctx.font_atlas_texture.sampler;
 
             VkWriteDescriptorSet write_descriptor_set = {};
             write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1961,6 +2244,7 @@ void _vk_create_swapchain_dependent()
 
     ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle_tri();
     ctx.vk_ui_pipeline_bundle = _vk_create_pipeline_bundle_ui();
+    ctx.vk_text_pipeline_bundle = _vk_create_pipeline_bundle_text();
     ctx.vk_cubes_pipeline_bundle = _vk_create_pipeline_bundle_cubes();
 
     ctx.first_swapchain_use = true;
@@ -1972,6 +2256,7 @@ void _vk_destroy_swapchain_dependent()
 
     _vk_destroy_pipeline_bundle(&ctx.vk_tri_pipeline_bundle);
     _vk_destroy_pipeline_bundle(&ctx.vk_ui_pipeline_bundle);
+    _vk_destroy_pipeline_bundle(&ctx.vk_text_pipeline_bundle);
     _vk_destroy_pipeline_bundle(&ctx.vk_cubes_pipeline_bundle);
 
     _vk_destroy_render_pass_bundle(&ctx.vk_clear_render_pass_bundle);
@@ -2046,6 +2331,9 @@ void e2r_init(int width, int height, const char *name)
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
     ctx.ui_atlas_texture = _vk_load_texture("res/ui_atlas.png");
 
+    FontAtlas atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 32.0f, 2.0f);
+    ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&atlas);
+
     _vk_create_swapchain_dependent();
 
     app_ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
@@ -2064,8 +2352,6 @@ void e2r_init(int width, int height, const char *name)
     }
 
     app_ctx.first_mouse = true;
-
-    // FontAtlas atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 32.0f, 2.0f);
 }
 
 void e2r_destroy()
@@ -2074,6 +2360,7 @@ void e2r_destroy()
 
     _vk_destroy_texture_bundle(&ctx.ducks_texture);
     _vk_destroy_texture_bundle(&ctx.ui_atlas_texture);
+    _vk_destroy_texture_bundle(&ctx.font_atlas_texture);
 
     _vk_destroy_buffer_bundle_list(&ctx.global_ubo_2d);
     _vk_destroy_buffer_bundle_list(&ctx.global_ubo_3d);
@@ -2201,7 +2488,6 @@ void e2r_draw()
         v2 quad_screen_min = V2(300.0f, 200.0f);
         v2 quad_screen_dim = V2(24.0f, 24.0f);
 
-        // quad_screen_dim.y = -quad_screen_dim.y;
         v2 quad_screen_max = v2_add(quad_screen_min, quad_screen_dim);
 
         v3 quad_screen_pos[4] = {};
@@ -2232,6 +2518,48 @@ void e2r_draw()
         ui_index_count = array_count(indices);
 
         memcpy(ctx.vk_ui_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
+    }
+
+    // Text pipeline data
+    u32 text_index_count;
+    {
+        v2 quad_screen_min = V2(500.0f, 600.0f);
+        v2 quad_screen_dim = V2(100.0f, 100.0f);
+
+        v2 quad_screen_max = v2_add(quad_screen_min, quad_screen_dim);
+
+        v3 quad_screen_pos[4] = {};
+        quad_screen_pos[0] = V3(quad_screen_min.x, quad_screen_min.y, 0.0f);
+        quad_screen_pos[1] = V3(quad_screen_max.x, quad_screen_min.y, 0.0f);
+        quad_screen_pos[2] = V3(quad_screen_max.x, quad_screen_max.y, 0.0f);
+        quad_screen_pos[3] = V3(quad_screen_min.x, quad_screen_max.y, 0.0f);
+
+        v2 atlas_q_verts[4] = {};
+        // _ui_get_atlas_q_verts(V2I(2, 0), atlas_q_verts);
+        atlas_q_verts[0] = V2(0.0f, 0.0f);
+        atlas_q_verts[1] = V2(1.0f, 0.0f);
+        atlas_q_verts[2] = V2(1.0f, 1.0f);
+        atlas_q_verts[3] = V2(0.0f, 1.0f);
+
+        v4 color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+
+        const VertexUI verts[] =
+        {
+            {quad_screen_pos[0], atlas_q_verts[0], color},
+            {quad_screen_pos[1], atlas_q_verts[1], color},
+            {quad_screen_pos[2], atlas_q_verts[2], color},
+            {quad_screen_pos[3], atlas_q_verts[3], color},
+        };
+
+        memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
+
+        const VertIndex indices[] =
+        {
+            0, 1, 2, 0, 2, 3
+        };
+        text_index_count = array_count(indices);
+
+        memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
     }
 
     // Cubes pipeline data
@@ -2457,6 +2785,24 @@ void e2r_draw()
                 );
 
                 vkCmdDrawIndexed(frame->command_buffer, ui_index_count, 1, 0, 0, 0);
+            }
+
+            vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_text_pipeline_bundle.pipeline);
+            {
+                VkDeviceSize offsets[] = {0};
+                vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
+
+                vkCmdBindIndexBuffer(frame->command_buffer, ctx.vk_text_pipeline_bundle.index_buffer_bundle.buffer, 0, VERT_INDEX_TYPE);
+
+                vkCmdBindDescriptorSets(
+                    frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                    ctx.vk_text_pipeline_bundle.pipeline_layout,
+                    0,
+                    1, &ctx.vk_text_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
+                    0, NULL
+                );
+
+                vkCmdDrawIndexed(frame->command_buffer, text_index_count, 1, 0, 0, 0);
             }
 
             vkCmdEndRenderPass(frame->command_buffer);
