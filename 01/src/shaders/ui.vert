@@ -1,0 +1,16 @@
+#version 450
+
+layout(location = 0) in vec3 inPos;
+layout(location = 1) in vec4 inColor;
+
+layout(location = 0) out vec4 fragColor;
+
+layout(std140, set = 0, binding = 0) uniform UBO_2D {
+    mat4 view_proj;
+} ubo_2d;
+
+void main()
+{
+    gl_Position = ubo_2d.view_proj * vec4(inPos, 1.0);
+    fragColor = inColor;
+}

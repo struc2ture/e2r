@@ -5,6 +5,7 @@ LFLAGS += -L/Users/struc/dev/jects/font-loader/out -lfont_loader
 
 SHADERS = bin/shaders/tri.vert.spv bin/shaders/tri.frag.spv
 SHADERS += bin/shaders/cubes.vert.spv bin/shaders/cubes.frag.spv
+SHADERS += bin/shaders/ui.vert.spv bin/shaders/ui.frag.spv
 
 export VK_ICD_FILENAMES = /usr/local/share/vulkan/icd.d/MoltenVK_icd.json
 export VK_LAYER_PATH = /usr/local/share/vulkan/explicit_layer.d
@@ -24,6 +25,12 @@ bin/shaders/tri.vert.spv: src/shaders/tri.vert
 	glslc $< -o $@
 
 bin/shaders/tri.frag.spv: src/shaders/tri.frag
+	glslc $< -o $@
+
+bin/shaders/ui.vert.spv: src/shaders/ui.vert
+	glslc $< -o $@
+
+bin/shaders/ui.frag.spv: src/shaders/ui.frag
 	glslc $< -o $@
 
 bin/shaders/cubes.vert.spv: src/shaders/cubes.vert
