@@ -11,6 +11,7 @@
 
 #include "common/lin_math.h"
 #include "common/print_helpers.h"
+#include "common/random.h"
 #include "common/types.h"
 #include "common/util.h"
 
@@ -138,7 +139,6 @@ typedef struct UBOLayoutGlobal2D
 
 typedef struct UBOLayoutGlobal3D
 {
-    m4 model;
     m4 view_proj;
 
 } UBOLayoutGlobal3D;
@@ -177,6 +177,9 @@ typedef struct E2R_Ctx
     Vk_PipelineBundle vk_cubes_pipeline_bundle;
 
     E2R_Camera camera;
+
+    int cube_count;
+    m4 *cube_model_transforms;
 
 } E2R_Ctx;
 
@@ -1225,17 +1228,17 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
 
     VkPipelineLayout pipeline_layout;
     {
-        // VkPushConstantRange model_push_constant = {};
-        // model_push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-        // model_push_constant.offset = 0;
-        // model_push_constant.size = sizeof(m4);
+        VkPushConstantRange model_push_constant = {};
+        model_push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        model_push_constant.offset = 0;
+        model_push_constant.size = sizeof(m4);
 
         VkPipelineLayoutCreateInfo pipeline_layout_create_info = {};
         pipeline_layout_create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
         pipeline_layout_create_info.setLayoutCount = 1;
         pipeline_layout_create_info.pSetLayouts = &descriptor_set_layout;
-        // pipeline_layout_create_info.pushConstantRangeCount = 1;
-        // pipeline_layout_create_info.pPushConstantRanges = &model_push_constant;
+        pipeline_layout_create_info.pushConstantRangeCount = 1;
+        pipeline_layout_create_info.pPushConstantRanges = &model_push_constant;
 
         result = vkCreatePipelineLayout(ctx.vk_device, &pipeline_layout_create_info, NULL, &pipeline_layout);
         if (result != VK_SUCCESS) fatal("Failed to create pipeline layout");
@@ -1546,9 +1549,6 @@ void _vk_destroy_pipeline_bundle(Vk_PipelineBundle *bundle)
         _vk_destroy_buffer_bundle(&bundle->index_buffer_bundle);
     }
 
-    // VkResult result = vkFreeDescriptorSets(ctx.vk_device, bundle->descriptor_pool, bundle->descriptor_set_count, bundle->descriptor_sets);
-    // if (result != VK_SUCCESS) fatal("Failed to free descriptor sets");
-
     free(bundle->descriptor_sets);
 
     vkDestroyDescriptorPool(ctx.vk_device, bundle->descriptor_pool, NULL);
@@ -1592,6 +1592,19 @@ void e2r_init(int width, int height, const char *name)
     ctx.vk_cubes_pipeline_bundle = _vk_create_pipeline_bundle_cubes();
 
     ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
+
+    ctx.cube_count = 32;
+    ctx.cube_model_transforms = xmalloc(ctx.cube_count * sizeof(ctx.cube_model_transforms[0]));
+    for (int i = 0; i < ctx.cube_count; i++)
+    {
+        f32 rand_x = rand_float() * 3.0f - 1.5f;
+        f32 rand_y = rand_float() * 3.0f - 1.5f;
+        f32 rand_z = rand_float() * 3.0f - 1.5f;
+        m4 translate = m4_translate(rand_x, rand_y, rand_z);
+        f32 rand_angle = rand_float() * 360.0f;
+        m4 rotate = m4_rotate(deg_to_rad(rand_angle), rand_v3(1.0f));
+        ctx.cube_model_transforms[i] = m4_mul(translate, rotate);
+    }
 }
 
 void e2r_destroy()
@@ -1782,7 +1795,6 @@ void e2r_draw()
     {
         UBOLayoutGlobal3D ubo_data =
         {
-            .model = m4_identity(),
             .view_proj = view_proj
         };
 
@@ -1798,149 +1810,161 @@ void e2r_draw()
     }
     else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
 
-    result = vkResetCommandBuffer(frame->command_buffer, 0);
-    if (result != VK_SUCCESS) fatal("Failed to reset command buffer");
-
-    VkCommandBufferBeginInfo command_buffer_begin_info = {};
-    command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    result = vkBeginCommandBuffer(frame->command_buffer, &command_buffer_begin_info);
-    if (result != VK_SUCCESS) fatal("Failed to begin command buffer");
-
-    // Clear Render pass
+    // Render
     {
-        VkClearValue clear_values[] = {
-            [0].color = (VkClearColorValue){{1.0f, 1.0f, 0.0f, 1.0f}},
-            [1].depthStencil = (VkClearDepthStencilValue){1.0f, 0}
-        };
-        VkRect2D render_area = {};
-        render_area.offset = (VkOffset2D){0, 0};
-        render_area.extent = ctx.vk_swapchain_bundle.extent;
-        VkRenderPassBeginInfo render_pass_begin_info = {};
-        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        render_pass_begin_info.renderPass = ctx.vk_clear_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_clear_render_pass_bundle.framebuffers[next_image_index];
-        render_pass_begin_info.renderArea = render_area;
-        render_pass_begin_info.clearValueCount = array_count(clear_values);
-        render_pass_begin_info.pClearValues = clear_values;
-        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdEndRenderPass(frame->command_buffer);
+        result = vkResetCommandBuffer(frame->command_buffer, 0);
+        if (result != VK_SUCCESS) fatal("Failed to reset command buffer");
+
+        VkCommandBufferBeginInfo command_buffer_begin_info = {};
+        command_buffer_begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        result = vkBeginCommandBuffer(frame->command_buffer, &command_buffer_begin_info);
+        if (result != VK_SUCCESS) fatal("Failed to begin command buffer");
+
+        // Clear Render pass
+        {
+            VkClearValue clear_values[] = {
+                [0].color = (VkClearColorValue){{1.0f, 1.0f, 0.0f, 1.0f}},
+                [1].depthStencil = (VkClearDepthStencilValue){1.0f, 0}
+            };
+            VkRect2D render_area = {};
+            render_area.offset = (VkOffset2D){0, 0};
+            render_area.extent = ctx.vk_swapchain_bundle.extent;
+            VkRenderPassBeginInfo render_pass_begin_info = {};
+            render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_begin_info.renderPass = ctx.vk_clear_render_pass_bundle.render_pass;
+            render_pass_begin_info.framebuffer = ctx.vk_clear_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.renderArea = render_area;
+            render_pass_begin_info.clearValueCount = array_count(clear_values);
+            render_pass_begin_info.pClearValues = clear_values;
+            vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdEndRenderPass(frame->command_buffer);
+        }
+
+        // 3D Render pass
+        {
+            VkClearValue clear_values[] = {
+                [0].color = {},
+                [1].depthStencil = (VkClearDepthStencilValue){1.0f, 0}
+            };
+            VkRect2D render_area = {};
+            render_area.offset = (VkOffset2D){0, 0};
+            render_area.extent = ctx.vk_swapchain_bundle.extent;
+            VkRenderPassBeginInfo render_pass_begin_info = {};
+            render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_begin_info.renderPass = ctx.vk_3d_render_pass_bundle.render_pass;
+            render_pass_begin_info.framebuffer = ctx.vk_3d_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.renderArea = render_area;
+            render_pass_begin_info.clearValueCount = array_count(clear_values);
+            render_pass_begin_info.pClearValues = clear_values;
+            vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_cubes_pipeline_bundle.pipeline);
+
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_cubes_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
+
+            vkCmdBindIndexBuffer(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.buffer, 0, VERT_INDEX_TYPE);
+
+            vkCmdBindDescriptorSets(
+                frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.vk_cubes_pipeline_bundle.pipeline_layout,
+                0,
+                1, &ctx.vk_cubes_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
+                0, NULL
+            );
+
+            for (int i = 0; i < ctx.cube_count; i++)
+            {
+                m4 model = ctx.cube_model_transforms[i];
+
+                vkCmdPushConstants(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(m4), &model);
+
+                vkCmdDrawIndexed(frame->command_buffer, index_count, 1, 0, 0, 0);
+            }
+
+            vkCmdEndRenderPass(frame->command_buffer);
+        }
+
+        // 2D Render pass
+        {
+            VkRect2D render_area = {};
+            render_area.offset = (VkOffset2D){0, 0};
+            render_area.extent = ctx.vk_swapchain_bundle.extent;
+            VkRenderPassBeginInfo render_pass_begin_info = {};
+            render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_begin_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
+            render_pass_begin_info.framebuffer = ctx.vk_2d_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.renderArea = render_area;
+            render_pass_begin_info.clearValueCount = 0;
+            vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+
+            vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
+
+            VkDeviceSize offsets[] = {0};
+            vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
+
+            vkCmdBindDescriptorSets(
+                frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                ctx.vk_tri_pipeline_bundle.pipeline_layout,
+                0,
+                1, &ctx.vk_tri_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
+                0, NULL
+            );
+
+            vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
+
+            vkCmdEndRenderPass(frame->command_buffer);
+        }
+
+        // Final Render pass
+        {
+            VkRect2D render_area = {};
+            render_area.offset = (VkOffset2D){0, 0};
+            render_area.extent = ctx.vk_swapchain_bundle.extent;
+            VkRenderPassBeginInfo render_pass_begin_info = {};
+            render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+            render_pass_begin_info.renderPass = ctx.vk_final_render_pass_bundle.render_pass;
+            render_pass_begin_info.framebuffer = ctx.vk_final_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.renderArea = render_area;
+            render_pass_begin_info.clearValueCount = 0;
+            vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+            vkCmdEndRenderPass(frame->command_buffer);
+        }
+
+        result = vkEndCommandBuffer(frame->command_buffer);
+        if (result != VK_SUCCESS) fatal("Failed to end command buffer");
+
+        // Submit command buffer
+        VkPipelineStageFlags wait_destination_stage_mask[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+        VkSubmitInfo submit_info = {};
+        submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+        submit_info.waitSemaphoreCount = 1;
+        submit_info.pWaitSemaphores = &frame->acquire_semaphore;
+        submit_info.pWaitDstStageMask = wait_destination_stage_mask;
+        submit_info.commandBufferCount = 1;
+        submit_info.pCommandBuffers = &frame->command_buffer;
+        submit_info.signalSemaphoreCount = 1;
+        submit_info.pSignalSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
+
+        result = vkQueueSubmit(ctx.vk_queue, 1, &submit_info, frame->in_flight_fence);
+        if (result != VK_SUCCESS) fatal("Failed to submit command buffer to queue");
     }
-
-    // 3D Render pass
-    {
-        VkClearValue clear_values[] = {
-            [0].color = {},
-            [1].depthStencil = (VkClearDepthStencilValue){1.0f, 0}
-        };
-        VkRect2D render_area = {};
-        render_area.offset = (VkOffset2D){0, 0};
-        render_area.extent = ctx.vk_swapchain_bundle.extent;
-        VkRenderPassBeginInfo render_pass_begin_info = {};
-        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        render_pass_begin_info.renderPass = ctx.vk_3d_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_3d_render_pass_bundle.framebuffers[next_image_index];
-        render_pass_begin_info.renderArea = render_area;
-        render_pass_begin_info.clearValueCount = array_count(clear_values);
-        render_pass_begin_info.pClearValues = clear_values;
-        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_cubes_pipeline_bundle.pipeline);
-
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_cubes_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
-
-        vkCmdBindIndexBuffer(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.buffer, 0, VERT_INDEX_TYPE);
-
-        vkCmdBindDescriptorSets(
-            frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.vk_cubes_pipeline_bundle.pipeline_layout,
-            0,
-            1, &ctx.vk_cubes_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
-            0, NULL
-        );
-
-        vkCmdDrawIndexed(frame->command_buffer, index_count, 1, 0, 0, 0);
-
-        vkCmdEndRenderPass(frame->command_buffer);
-    }
-
-    // 2D Render pass
-    {
-        VkRect2D render_area = {};
-        render_area.offset = (VkOffset2D){0, 0};
-        render_area.extent = ctx.vk_swapchain_bundle.extent;
-        VkRenderPassBeginInfo render_pass_begin_info = {};
-        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        render_pass_begin_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_2d_render_pass_bundle.framebuffers[next_image_index];
-        render_pass_begin_info.renderArea = render_area;
-        render_pass_begin_info.clearValueCount = 0;
-        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-
-        vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
-
-        VkDeviceSize offsets[] = {0};
-        vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
-
-        vkCmdBindDescriptorSets(
-            frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-            ctx.vk_tri_pipeline_bundle.pipeline_layout,
-            0,
-            1, &ctx.vk_tri_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
-            0, NULL
-        );
-
-        vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
-
-        vkCmdEndRenderPass(frame->command_buffer);
-    }
-
-    // Final Render pass
-    {
-        VkRect2D render_area = {};
-        render_area.offset = (VkOffset2D){0, 0};
-        render_area.extent = ctx.vk_swapchain_bundle.extent;
-        VkRenderPassBeginInfo render_pass_begin_info = {};
-        render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-        render_pass_begin_info.renderPass = ctx.vk_final_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_final_render_pass_bundle.framebuffers[next_image_index];
-        render_pass_begin_info.renderArea = render_area;
-        render_pass_begin_info.clearValueCount = 0;
-        vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
-        vkCmdEndRenderPass(frame->command_buffer);
-    }
-
-    result = vkEndCommandBuffer(frame->command_buffer);
-    if (result != VK_SUCCESS) fatal("Failed to end command buffer");
-
-    // Submit command buffer
-    VkPipelineStageFlags wait_destination_stage_mask[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
-    VkSubmitInfo submit_info = {};
-    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    submit_info.waitSemaphoreCount = 1;
-    submit_info.pWaitSemaphores = &frame->acquire_semaphore;
-    submit_info.pWaitDstStageMask = wait_destination_stage_mask;
-    submit_info.commandBufferCount = 1;
-    submit_info.pCommandBuffers = &frame->command_buffer;
-    submit_info.signalSemaphoreCount = 1;
-    submit_info.pSignalSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
-
-    result = vkQueueSubmit(ctx.vk_queue, 1, &submit_info, frame->in_flight_fence);
-    if (result != VK_SUCCESS) fatal("Failed to submit command buffer to queue");
 
     // Present
-    VkPresentInfoKHR present_info = {};
-    present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    present_info.waitSemaphoreCount = 1;
-    present_info.pWaitSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
-    present_info.swapchainCount = 1;
-    present_info.pSwapchains = &ctx.vk_swapchain_bundle.swapchain;
-    present_info.pImageIndices = &next_image_index;
-    result = vkQueuePresentKHR(ctx.vk_queue, &present_info);
-    if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
     {
-        // recreate_everything = true;
-        // continue;
+        VkPresentInfoKHR present_info = {};
+        present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+        present_info.waitSemaphoreCount = 1;
+        present_info.pWaitSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
+        present_info.swapchainCount = 1;
+        present_info.pSwapchains = &ctx.vk_swapchain_bundle.swapchain;
+        present_info.pImageIndices = &next_image_index;
+        result = vkQueuePresentKHR(ctx.vk_queue, &present_info);
+        if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
+        {
+            // recreate_everything = true;
+            // continue;
+        }
+        else if (result != VK_SUCCESS) fatal("Error when presenting");
     }
-    else if (result != VK_SUCCESS) fatal("Error when presenting");
 }
