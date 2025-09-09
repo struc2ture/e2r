@@ -9,6 +9,8 @@
 #include <stb_image.h>
 #include <vulkan/vulkan_core.h>
 
+#include <font_loader.h>
+
 #include "common/lin_math.h"
 #include "common/print_helpers.h"
 #include "common/random.h"
@@ -1728,6 +1730,8 @@ void e2r_init(int width, int height, const char *name)
     }
 
     app_ctx.first_mouse = true;
+
+    // FontAtlas atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 32.0f, 2.0f);
 }
 
 void e2r_destroy()

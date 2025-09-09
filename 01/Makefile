@@ -1,12 +1,15 @@
 CFLAGS = -g -I/opt/homebrew/include -I/usr/local/include -I../../../shared/stb
+CFLAGS += -I/Users/struc/dev/jects/font-loader/out
 LFLAGS = -L/opt/homebrew/lib -L/usr/local/lib -lglfw -lvulkan
+LFLAGS += -L/Users/struc/dev/jects/font-loader/out -lfont_loader
 
 SHADERS = bin/shaders/tri.vert.spv bin/shaders/tri.frag.spv
 SHADERS += bin/shaders/cubes.vert.spv bin/shaders/cubes.frag.spv
 
 export VK_ICD_FILENAMES = /usr/local/share/vulkan/icd.d/MoltenVK_icd.json
 export VK_LAYER_PATH = /usr/local/share/vulkan/explicit_layer.d
-export DYLD_LIBRARY_PATH = /usr/local/lib:$DYLD_LIBRARY_PATH
+export DYLD_LIBRARY_PATH = /usr/local/lib:/Users/struc/dev/jects/font-loader/out:$$DYLD_LIBRARY_PATH
+# export DYLD_PRINT_LIBRARIES = 1
 
 debug: bin/test 
 	lldb bin/test -o run
