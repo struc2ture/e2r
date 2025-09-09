@@ -5,12 +5,16 @@ layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec2 inUV;
 layout(location = 3) in vec4 inColor;
 
-layout(std140, set = 0, binding = 0) uniform UBO_3D {
+layout(std140, set = 0, binding = 0) uniform UBO_3D
+{
     mat4 view_proj;
+
 } ubo_3d;
 
-layout(push_constant) uniform Push {
+layout(push_constant) uniform Push
+{
    mat4 model;
+
 } push;
 
 layout(location = 0) out vec4 fragColor;

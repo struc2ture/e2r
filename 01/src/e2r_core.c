@@ -143,6 +143,17 @@ typedef struct UBOLayoutGlobal3D
 
 } UBOLayoutGlobal3D;
 
+typedef struct UBOLayoutLighting
+{
+    v3 view_pos;
+    f32 ambient_strength; // also padding
+    v3 light_color;
+    f32 specular_strength; // also padding
+    v3 light_pos;
+    f32 shininess; // also padding
+
+} UBOLayoutLighting;
+
 // ------------------------------------
 
 typedef struct E2R_Ctx
@@ -170,6 +181,8 @@ typedef struct E2R_Ctx
 
     Vk_BufferBundleList global_ubo_2d;
     Vk_BufferBundleList global_ubo_3d;
+
+    Vk_BufferBundleList ubo_lighting;
 
     Vk_TextureBundle ducks_texture;
 
@@ -1200,6 +1213,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
 
     VkResult result;
 
+    const u32 ubo_count = 2;
     VkDescriptorSetLayout descriptor_set_layout;
     {
         // Global 3D UBO
@@ -1216,7 +1230,19 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
         descriptor_set_layout_binding_1.descriptorCount = 1;
         descriptor_set_layout_binding_1.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
-        VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] = {descriptor_set_layout_binding_0, descriptor_set_layout_binding_1};
+        // Lighting
+        VkDescriptorSetLayoutBinding descriptor_set_layout_binding_2 = {};
+        descriptor_set_layout_binding_2.binding = 2;
+        descriptor_set_layout_binding_2.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        descriptor_set_layout_binding_2.descriptorCount = 1;
+        descriptor_set_layout_binding_2.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] =
+        {
+            descriptor_set_layout_binding_0,
+            descriptor_set_layout_binding_1,
+            descriptor_set_layout_binding_2
+        };
         VkDescriptorSetLayoutCreateInfo descriptor_set_layout_create_info = {};
         descriptor_set_layout_create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         descriptor_set_layout_create_info.bindingCount = array_count(descriptor_set_layout_bindings);
@@ -1261,7 +1287,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
     {
         VkDescriptorPoolSize descriptor_pool_sizes[2] = {};
         descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptor_pool_sizes[0].descriptorCount = frame_count;
+        descriptor_pool_sizes[0].descriptorCount = frame_count * ubo_count;
         descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         descriptor_pool_sizes[1].descriptorCount = 1;
 
@@ -1288,38 +1314,64 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
             result = vkAllocateDescriptorSets(ctx.vk_device, &descriptor_set_allocate_info, &descriptor_sets[i]);
             if (result != VK_SUCCESS) fatal("Failed to allocate descriptor set");
 
-            const Vk_BufferBundle *buffer_bundle = &ctx.global_ubo_3d.buffer_bundles[i];
-            VkDescriptorBufferInfo descriptor_buffer_info = {};
-            descriptor_buffer_info.buffer = buffer_bundle->buffer;
-            descriptor_buffer_info.offset = 0;
-            descriptor_buffer_info.range = buffer_bundle->size;
+            // Update descriptor set: 3D UBO
+            {
+                const Vk_BufferBundle *buffer_bundle = &ctx.global_ubo_3d.buffer_bundles[i];
+                VkDescriptorBufferInfo global_ubo_3d_descriptor_buffer_info = {};
+                global_ubo_3d_descriptor_buffer_info.buffer = buffer_bundle->buffer;
+                global_ubo_3d_descriptor_buffer_info.offset = 0;
+                global_ubo_3d_descriptor_buffer_info.range = buffer_bundle->size;
 
-            VkWriteDescriptorSet uniform_buffer_write_descriptor_set = {};
-            uniform_buffer_write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            uniform_buffer_write_descriptor_set.dstSet = descriptor_sets[i];
-            uniform_buffer_write_descriptor_set.dstBinding = 0;
-            uniform_buffer_write_descriptor_set.dstArrayElement = 0;
-            uniform_buffer_write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            uniform_buffer_write_descriptor_set.descriptorCount = 1;
-            uniform_buffer_write_descriptor_set.pBufferInfo = &descriptor_buffer_info;
+                VkWriteDescriptorSet global_ubo_3d_write = {};
+                global_ubo_3d_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                global_ubo_3d_write.dstSet = descriptor_sets[i];
+                global_ubo_3d_write.dstBinding = 0;
+                global_ubo_3d_write.dstArrayElement = 0;
+                global_ubo_3d_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                global_ubo_3d_write.descriptorCount = 1;
+                global_ubo_3d_write.pBufferInfo = &global_ubo_3d_descriptor_buffer_info;
 
-            vkUpdateDescriptorSets(ctx.vk_device, 1, &uniform_buffer_write_descriptor_set, 0, NULL);
+                vkUpdateDescriptorSets(ctx.vk_device, 1, &global_ubo_3d_write, 0, NULL);
+            }
 
-            VkDescriptorImageInfo texture_sampler_descriptor_image_info = {};
-            texture_sampler_descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            texture_sampler_descriptor_image_info.imageView = ctx.ducks_texture.image_view;
-            texture_sampler_descriptor_image_info.sampler = ctx.ducks_texture.sampler;
+            // Update descriptor set: texture sampler
+            {
+                VkDescriptorImageInfo texture_sampler_descriptor_image_info = {};
+                texture_sampler_descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+                texture_sampler_descriptor_image_info.imageView = ctx.ducks_texture.image_view;
+                texture_sampler_descriptor_image_info.sampler = ctx.ducks_texture.sampler;
 
-            VkWriteDescriptorSet texture_sampler_write_descriptor_set = {};
-            texture_sampler_write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            texture_sampler_write_descriptor_set.dstSet = descriptor_sets[i];
-            texture_sampler_write_descriptor_set.dstBinding = 1;
-            texture_sampler_write_descriptor_set.dstArrayElement = 0;
-            texture_sampler_write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            texture_sampler_write_descriptor_set.descriptorCount = 1;
-            texture_sampler_write_descriptor_set.pImageInfo = &texture_sampler_descriptor_image_info;
+                VkWriteDescriptorSet texture_sampler_write = {};
+                texture_sampler_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                texture_sampler_write.dstSet = descriptor_sets[i];
+                texture_sampler_write.dstBinding = 1;
+                texture_sampler_write.dstArrayElement = 0;
+                texture_sampler_write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                texture_sampler_write.descriptorCount = 1;
+                texture_sampler_write.pImageInfo = &texture_sampler_descriptor_image_info;
 
-            vkUpdateDescriptorSets(ctx.vk_device, 1, &texture_sampler_write_descriptor_set, 0, NULL);
+                vkUpdateDescriptorSets(ctx.vk_device, 1, &texture_sampler_write, 0, NULL);
+            }
+
+            // Update descriptor set: Lighting UBO
+            {
+                const Vk_BufferBundle *buffer_bundle = &ctx.ubo_lighting.buffer_bundles[i];
+                VkDescriptorBufferInfo ubo_lighting_descriptor_buffer_info = {};
+                ubo_lighting_descriptor_buffer_info.buffer = buffer_bundle->buffer;
+                ubo_lighting_descriptor_buffer_info.offset = 0;
+                ubo_lighting_descriptor_buffer_info.range = buffer_bundle->size;
+
+                VkWriteDescriptorSet ubo_lighting_write = {};
+                ubo_lighting_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+                ubo_lighting_write.dstSet = descriptor_sets[i];
+                ubo_lighting_write.dstBinding = 2;
+                ubo_lighting_write.dstArrayElement = 0;
+                ubo_lighting_write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                ubo_lighting_write.descriptorCount = 1;
+                ubo_lighting_write.pBufferInfo = &ubo_lighting_descriptor_buffer_info;
+
+                vkUpdateDescriptorSets(ctx.vk_device, 1, &ubo_lighting_write, 0, NULL);
+            }
         }
     }
 
@@ -1586,6 +1638,8 @@ void e2r_init(int width, int height, const char *name)
     ctx.global_ubo_2d = _vk_create_buffer_bundle_list(sizeof(UBOLayoutGlobal2D), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
     ctx.global_ubo_3d = _vk_create_buffer_bundle_list(sizeof(UBOLayoutGlobal3D), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
+    ctx.ubo_lighting = _vk_create_buffer_bundle_list(sizeof(UBOLayoutLighting), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
+
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
 
     ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle_tri();
@@ -1618,6 +1672,7 @@ void e2r_destroy()
 
     _vk_destroy_buffer_bundle_list(&ctx.global_ubo_2d);
     _vk_destroy_buffer_bundle_list(&ctx.global_ubo_3d);
+    _vk_destroy_buffer_bundle_list(&ctx.ubo_lighting);
 
     _vk_destroy_frame_list(&ctx.vk_frame_list);
 
@@ -1775,30 +1830,44 @@ void e2r_draw()
         memcpy(ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
     }
 
-    // Global 2D and 3D uniforms
-    v2 window_dim = _glfw_get_window_size();
-
-    m4 ortho_proj = m4_proj_ortho(0.0f, window_dim.x, 0.0f, window_dim.y, -1.0f, 1.0f);
-
+    // UBOs
     {
-        UBOLayoutGlobal2D ubo_data =
+        v2 window_dim = _glfw_get_window_size();
+
+        m4 ortho_proj = m4_proj_ortho(0.0f, window_dim.x, 0.0f, window_dim.y, -1.0f, 1.0f);
+
         {
-            .proj = ortho_proj
-        };
-        memcpy(ctx.global_ubo_2d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
-    }
+            UBOLayoutGlobal2D ubo_data =
+            {
+                .proj = ortho_proj
+            };
+            memcpy(ctx.global_ubo_2d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
+        }
 
-    m4 camera_view = e2r_camera_get_view(&ctx.camera);
-    m4 perspective_proj = m4_proj_perspective(deg_to_rad(60), window_dim.x / window_dim.y, 0.1f, 100.0f);
-    m4 view_proj = m4_mul(perspective_proj, camera_view);
+        m4 camera_view = e2r_camera_get_view(&ctx.camera);
+        m4 perspective_proj = m4_proj_perspective(deg_to_rad(60), window_dim.x / window_dim.y, 0.1f, 100.0f);
+        m4 view_proj = m4_mul(perspective_proj, camera_view);
 
-    {
-        UBOLayoutGlobal3D ubo_data =
         {
-            .view_proj = view_proj
-        };
+            UBOLayoutGlobal3D ubo_data =
+            {
+                .view_proj = view_proj
+            };
+            memcpy(ctx.global_ubo_3d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
+        }
 
-        memcpy(ctx.global_ubo_3d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
+        {
+            UBOLayoutLighting ubo_data =
+            {
+                .view_pos = ctx.camera.pos,
+                .ambient_strength = 0.1f,
+                .light_color = V3(1.0f, 1.0f, 1.0f),
+                .specular_strength = 0.5f,
+                .light_pos = V3(0.0f, 10.0f, 0.0f),
+                .shininess = 1024.0f,
+            };
+            memcpy(ctx.ubo_lighting.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
+        }
     }
 
     u32 next_image_index;
