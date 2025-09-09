@@ -18,6 +18,20 @@ static inline f32 rad_to_deg(f32 rad)
     return deg;
 }
 
+// ----------------------------------------
+
+static inline v2 v2_add(v2 a, v2 b)
+{
+    v2 result =
+    {
+        .x = a.x + b.x,
+        .y = a.y + b.y
+    };
+    return result;
+}
+
+// ----------------------------------------
+
 v3 v3_normalize(v3 v);
 
 static inline v3 v3_cross(v3 a, v3 b)

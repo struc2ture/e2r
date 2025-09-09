@@ -122,11 +122,19 @@ typedef struct Vertex2D
 
 } Vertex2D;
 
+typedef struct VertexUI
+{
+    v3 pos;
+    v2 uv;
+    v4 color;
+
+} VertexUI;
+
 typedef struct Vertex3D
 {
     v3 pos;
     v3 normal;
-    v2 tex_coord;
+    v2 uv;
     v4 color;
 
 } Vertex3D;
@@ -190,6 +198,7 @@ typedef struct E2R_Ctx
     Vk_BufferBundleList ubo_lighting;
 
     Vk_TextureBundle ducks_texture;
+    Vk_TextureBundle ui_atlas_texture;
 
     Vk_PipelineBundle vk_tri_pipeline_bundle;
     Vk_PipelineBundle vk_ui_pipeline_bundle;
@@ -1286,7 +1295,18 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
         descriptor_set_layout_binding_0.descriptorCount = 1;
         descriptor_set_layout_binding_0.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
 
-        VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] = {descriptor_set_layout_binding_0};
+        // Texture Sampler
+        VkDescriptorSetLayoutBinding descriptor_set_layout_binding_1 = {};
+        descriptor_set_layout_binding_1.binding = 1;
+        descriptor_set_layout_binding_1.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_set_layout_binding_1.descriptorCount = 1;
+        descriptor_set_layout_binding_1.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+
+        VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] =
+        {
+            descriptor_set_layout_binding_0,
+            descriptor_set_layout_binding_1
+        };
         VkDescriptorSetLayoutCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
         create_info.bindingCount = array_count(descriptor_set_layout_bindings);
@@ -1322,9 +1342,11 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
 
     VkDescriptorPool descriptor_pool;
     {
-        VkDescriptorPoolSize descriptor_pool_sizes[1] = {};
+        VkDescriptorPoolSize descriptor_pool_sizes[2] = {};
         descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         descriptor_pool_sizes[0].descriptorCount = frame_count * ubo_count;
+        descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        descriptor_pool_sizes[1].descriptorCount = 1;
 
         VkDescriptorPoolCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1370,6 +1392,25 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
 
             vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
         }
+
+        // Update descriptor set: texture sampler
+        {
+            VkDescriptorImageInfo descriptor_image_info = {};
+            descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            descriptor_image_info.imageView = ctx.ui_atlas_texture.image_view;
+            descriptor_image_info.sampler = ctx.ui_atlas_texture.sampler;
+
+            VkWriteDescriptorSet write_descriptor_set = {};
+            write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+            write_descriptor_set.dstSet = descriptor_sets[i];
+            write_descriptor_set.dstBinding = 1;
+            write_descriptor_set.dstArrayElement = 0;
+            write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            write_descriptor_set.descriptorCount = 1;
+            write_descriptor_set.pImageInfo = &descriptor_image_info;
+
+            vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
+        }
     }
 
     pipeline_bundle.descriptor_pool = descriptor_pool;
@@ -1393,22 +1434,28 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
 
         VkVertexInputBindingDescription vertex_input_binding_description = {};
         vertex_input_binding_description.binding = 0;
-        vertex_input_binding_description.stride = sizeof(Vertex2D);
+        vertex_input_binding_description.stride = sizeof(VertexUI);
         vertex_input_binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-        int vert_attrib_count = 2;
+        int vert_attrib_count = 3;
         VkVertexInputAttributeDescription *vertex_input_attribute_descriptions = xmalloc(vert_attrib_count * sizeof(vertex_input_attribute_descriptions[0]));
         vertex_input_attribute_descriptions[0] = (VkVertexInputAttributeDescription){
             .location = 0,
             .binding = 0,
             .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = offsetof(Vertex2D, pos)
+            .offset = offsetof(VertexUI, pos)
         };
         vertex_input_attribute_descriptions[1] = (VkVertexInputAttributeDescription){
             .location = 1,
             .binding = 0,
+            .format = VK_FORMAT_R32G32_SFLOAT,
+            .offset = offsetof(VertexUI, uv)
+        };
+        vertex_input_attribute_descriptions[2] = (VkVertexInputAttributeDescription){
+            .location = 2,
+            .binding = 0,
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .offset = offsetof(Vertex2D, color)
+            .offset = offsetof(VertexUI, color)
         };
 
         VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
@@ -1443,11 +1490,14 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
         multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
         VkPipelineColorBlendAttachmentState color_blend_attachment = {};
-        color_blend_attachment.colorWriteMask = (VK_COLOR_COMPONENT_R_BIT |
-                                                                VK_COLOR_COMPONENT_G_BIT |
-                                                                VK_COLOR_COMPONENT_B_BIT |
-                                                                VK_COLOR_COMPONENT_A_BIT);
-        color_blend_attachment.blendEnable = VK_FALSE;
+        color_blend_attachment.colorWriteMask = (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
+        color_blend_attachment.blendEnable = VK_TRUE;
+        color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+        color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
+        color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
 
         VkPipelineColorBlendStateCreateInfo color_blend_state = {};
         color_blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -1702,7 +1752,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
             .location = 2,
             .binding = 0,
             .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = offsetof(Vertex3D, tex_coord)
+            .offset = offsetof(Vertex3D, uv)
         };
         vertex_input_attribute_descriptions[3] = (VkVertexInputAttributeDescription){
             .location = 3,
@@ -1935,6 +1985,45 @@ void _vk_destroy_swapchain_dependent()
 
 // --------------------------------
 
+static void _ui_get_atlas_q_verts(v2i cell_p, v2 out_verts[4])
+{
+    const f32 atlas_dim = 1024.0f;
+    const f32 atlas_cell_dim = 64.0f;
+    const f32 atlas_cell_pad = 4.0f;
+    f32 min_x = cell_p.x * atlas_cell_dim;
+    f32 max_x = min_x + atlas_cell_dim;
+    min_x += atlas_cell_pad;
+    max_x -= atlas_cell_pad;
+
+    f32 max_y = atlas_dim - cell_p.y * atlas_cell_dim;
+    f32 min_y = max_y - atlas_cell_dim;
+    max_y -= atlas_cell_pad;
+    min_y += atlas_cell_pad;
+
+    // TODO: figure this out. I think this actually makes it look worse
+    // texel offset, to sample the middle of texels
+    // min_x += 0.5f;
+    // max_x += 0.5f;
+    // min_y += 0.5f;
+    // max_y += 0.5f;
+
+    // Normalized range
+    min_x /= atlas_dim;
+    max_x /= atlas_dim;
+    min_y /= atlas_dim;
+    max_y /= atlas_dim;
+
+    out_verts[0].x = min_x; out_verts[0].y = min_y;
+    out_verts[1].x = max_x; out_verts[1].y = min_y;
+    out_verts[2].x = max_x; out_verts[2].y = max_y;
+    out_verts[3].x = min_x; out_verts[3].y = max_y;
+
+    // for (int i = 0; i < 4; i++)
+    //     trace("atlas_vert[%d]: %f, %f", i, out_verts[i].x, out_verts[i].y);
+}
+
+// --------------------------------
+
 void e2r_init(int width, int height, const char *name)
 {
     ctx.glfw_window = _glfw_create_window(width, height, name);
@@ -1955,6 +2044,7 @@ void e2r_init(int width, int height, const char *name)
     ctx.ubo_lighting = _vk_create_buffer_bundle_list(sizeof(UBOLayoutLighting), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT);
 
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
+    ctx.ui_atlas_texture = _vk_load_texture("res/ui_atlas.png");
 
     _vk_create_swapchain_dependent();
 
@@ -1983,6 +2073,7 @@ void e2r_destroy()
     vkDeviceWaitIdle(ctx.vk_device);
 
     _vk_destroy_texture_bundle(&ctx.ducks_texture);
+    _vk_destroy_texture_bundle(&ctx.ui_atlas_texture);
 
     _vk_destroy_buffer_bundle_list(&ctx.global_ubo_2d);
     _vk_destroy_buffer_bundle_list(&ctx.global_ubo_3d);
@@ -2107,12 +2198,29 @@ void e2r_draw()
     // UI pipeline data
     u32 ui_index_count;
     {
-        const Vertex2D verts[] =
+        v2 quad_screen_min = V2(300.0f, 200.0f);
+        v2 quad_screen_dim = V2(24.0f, 24.0f);
+
+        // quad_screen_dim.y = -quad_screen_dim.y;
+        v2 quad_screen_max = v2_add(quad_screen_min, quad_screen_dim);
+
+        v3 quad_screen_pos[4] = {};
+        quad_screen_pos[0] = V3(quad_screen_min.x, quad_screen_min.y, 0.0f);
+        quad_screen_pos[1] = V3(quad_screen_max.x, quad_screen_min.y, 0.0f);
+        quad_screen_pos[2] = V3(quad_screen_max.x, quad_screen_max.y, 0.0f);
+        quad_screen_pos[3] = V3(quad_screen_min.x, quad_screen_max.y, 0.0f);
+
+        v2 atlas_q_verts[4] = {};
+        _ui_get_atlas_q_verts(V2I(2, 0), atlas_q_verts);
+
+        v4 color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+
+        const VertexUI verts[] =
         {
-            {V3(300.0f, 300.0f, 0.0f), V4(1.0f, 0.0f, 0.0f, 1.0f)},
-            {V3(400.0f, 300.0f, 0.0f), V4(0.0f, 1.0f, 0.0f, 1.0f)},
-            {V3(400.0f, 200.0f, 0.0f), V4(0.0f, 0.0f, 1.0f, 1.0f)},
-            {V3(300.0f, 200.0f, 0.0f), V4(0.0f, 0.0f, 1.0f, 1.0f)},
+            {quad_screen_pos[0], atlas_q_verts[0], color},
+            {quad_screen_pos[1], atlas_q_verts[1], color},
+            {quad_screen_pos[2], atlas_q_verts[2], color},
+            {quad_screen_pos[3], atlas_q_verts[3], color},
         };
 
         memcpy(ctx.vk_ui_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
