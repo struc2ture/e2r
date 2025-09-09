@@ -225,6 +225,8 @@ typedef struct AppCtx
     f64 mouse_dx_smoothed, mouse_dy_smoothed;
     bool first_mouse;
 
+    FontAtlas font_atlas;
+
 } AppCtx;
 
 globvar E2R_Ctx ctx;
@@ -2307,6 +2309,27 @@ static void _ui_get_atlas_q_verts(v2i cell_p, v2 out_verts[4])
     //     trace("atlas_vert[%d]: %f, %f", i, out_verts[i].x, out_verts[i].y);
 }
 
+static void _text_get_font_atlas_verts(char ch, f32 *pen_x, f32 *pen_y, const FontAtlas *font_atlas, v2 out_screen_verts[4], v2 out_tex_verts[4])
+{
+    f32 x = *pen_x;
+    f32 y = *pen_y + font_loader_get_ascender(font_atlas);
+
+    GlyphQuad q = font_loader_get_glyph_quad(font_atlas, ch, x, y);
+
+    out_screen_verts[0] = V2(q.screen_min_x, q.screen_max_y);
+    out_screen_verts[1] = V2(q.screen_max_x, q.screen_max_y);
+    out_screen_verts[2] = V2(q.screen_max_x, q.screen_min_y);
+    out_screen_verts[3] = V2(q.screen_min_x, q.screen_min_y);
+
+    // TexCoords in reverse order to flip the quad
+    out_tex_verts[0] = V2(q.tex_min_x, q.tex_max_y);
+    out_tex_verts[1] = V2(q.tex_max_x, q.tex_max_y);
+    out_tex_verts[2] = V2(q.tex_max_x, q.tex_min_y);
+    out_tex_verts[3] = V2(q.tex_min_x, q.tex_min_y);
+
+    *pen_x += font_loader_get_advance_x(font_atlas, ch);
+}
+
 // --------------------------------
 
 void e2r_init(int width, int height, const char *name)
@@ -2331,8 +2354,8 @@ void e2r_init(int width, int height, const char *name)
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
     ctx.ui_atlas_texture = _vk_load_texture("res/ui_atlas.png");
 
-    FontAtlas atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 32.0f, 2.0f);
-    ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&atlas);
+    app_ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 32.0f, 2.0f);
+    ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&app_ctx.font_atlas);
 
     _vk_create_swapchain_dependent();
 
@@ -2523,43 +2546,49 @@ void e2r_draw()
     // Text pipeline data
     u32 text_index_count;
     {
-        v2 quad_screen_min = V2(500.0f, 600.0f);
-        v2 quad_screen_dim = V2(100.0f, 100.0f);
+        f32 pen_x = 600.0f;
+        f32 pen_y = 600.0f;
 
-        v2 quad_screen_max = v2_add(quad_screen_min, quad_screen_dim);
+        const char *str = "Hello, world!";
+        const int len = strlen(str);
 
-        v3 quad_screen_pos[4] = {};
-        quad_screen_pos[0] = V3(quad_screen_min.x, quad_screen_min.y, 0.0f);
-        quad_screen_pos[1] = V3(quad_screen_max.x, quad_screen_min.y, 0.0f);
-        quad_screen_pos[2] = V3(quad_screen_max.x, quad_screen_max.y, 0.0f);
-        quad_screen_pos[3] = V3(quad_screen_min.x, quad_screen_max.y, 0.0f);
-
-        v2 atlas_q_verts[4] = {};
-        // _ui_get_atlas_q_verts(V2I(2, 0), atlas_q_verts);
-        atlas_q_verts[0] = V2(0.0f, 0.0f);
-        atlas_q_verts[1] = V2(1.0f, 0.0f);
-        atlas_q_verts[2] = V2(1.0f, 1.0f);
-        atlas_q_verts[3] = V2(0.0f, 1.0f);
-
-        v4 color = V4(1.0f, 1.0f, 1.0f, 1.0f);
-
-        const VertexUI verts[] =
+        VertexUI *verts = xmalloc(MAX_VERTEX_COUNT * sizeof(verts[0]));
+        VertIndex *indices = xmalloc(MAX_INDEX_COUNT * sizeof(indices[0]));
+        u32 vert_count = 0;
+        u32 index_count = 0;
+        for (int str_i = 0; str_i < len; str_i++)
         {
-            {quad_screen_pos[0], atlas_q_verts[0], color},
-            {quad_screen_pos[1], atlas_q_verts[1], color},
-            {quad_screen_pos[2], atlas_q_verts[2], color},
-            {quad_screen_pos[3], atlas_q_verts[3], color},
-        };
+            v2 screen_verts[4];
+            v2 tex_verts[4];
+            _text_get_font_atlas_verts(str[str_i], &pen_x, &pen_y, &app_ctx.font_atlas, screen_verts, tex_verts);
+            v4 color = V4(1.0f, 1.0f, 1.0f, 1.0f);
 
-        memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
+            u32 base_index = vert_count;
+            for (int i = 0; i < 4; i++)
+            {
+                verts[vert_count++] = (VertexUI){
+                    .pos = V3(screen_verts[i].x, screen_verts[i].y, 0.0f),
+                    .uv = tex_verts[i],
+                    .color = color
+                };
+            }
 
-        const VertIndex indices[] =
-        {
-            0, 1, 2, 0, 2, 3
-        };
-        text_index_count = array_count(indices);
+            indices[index_count++] = 0 + base_index;
+            indices[index_count++] = 1 + base_index;
+            indices[index_count++] = 2 + base_index;
+            indices[index_count++] = 0 + base_index;
+            indices[index_count++] = 2 + base_index;
+            indices[index_count++] = 3 + base_index;
+        }
 
-        memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
+        memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, vert_count * sizeof(VertexUI));
+
+        text_index_count = index_count;
+
+        memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, indices, index_count * sizeof(VertIndex));
+
+        free(verts);
+        free(indices);
     }
 
     // Cubes pipeline data
