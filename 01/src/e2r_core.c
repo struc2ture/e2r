@@ -22,25 +22,19 @@ typedef struct Vk_SwapchainBundle
 {
     VkSwapchainKHR swapchain;
     VkSurfaceFormatKHR format;
+    VkExtent2D extent;
     VkImage *images;
+    VkImageView *image_views;
     VkSemaphore *submit_semaphores;
     u32 image_count;
-    VkExtent2D extent;
 
 } Vk_SwapchainBundle;
-
-typedef struct Vk_RenderTarget
-{
-    VkImageView color_view;
-    VkImageView depth_view;
-    VkFramebuffer framebuffer;
-
-} Vk_RenderTarget;
 
 typedef struct Vk_DepthImageBundle
 {
     VkImage *images;
     VkDeviceMemory *memory_list;
+    VkImageView *image_views;
     u32 image_count;
     VkFormat depth_format;
 
@@ -49,8 +43,8 @@ typedef struct Vk_DepthImageBundle
 typedef struct Vk_RenderPassBundle
 {
     VkRenderPass render_pass;
-    Vk_RenderTarget *render_targets;
-    u32 render_target_count;
+    VkFramebuffer *framebuffers;
+    u32 framebuffer_count;
     VkFormat color_format;
     VkFormat depth_format;
 
@@ -345,7 +339,6 @@ Vk_SwapchainBundle _vk_create_swapchain_bundle()
     if (result != VK_SUCCESS) fatal("Failed to get physical device-surface formats");
 
     VkSurfaceFormatKHR *formats = xmalloc(format_count * sizeof(formats[0]));
-
     result = vkGetPhysicalDeviceSurfaceFormatsKHR(ctx.vk_physical_device, ctx.vk_surface, &format_count, formats);
     if (result != VK_SUCCESS) fatal("Failed to get physical device-surface formats 2");
 
@@ -387,13 +380,34 @@ Vk_SwapchainBundle _vk_create_swapchain_bundle()
     result = vkGetSwapchainImagesKHR(ctx.vk_device, swapchain, &image_count, images);
     if (result != VK_SUCCESS) fatal("Failed to get swapchain images 2");
 
-    VkSemaphoreCreateInfo semaphore_create_info = {};
-    semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    VkSemaphore *submit_semaphores = xmalloc(image_count * sizeof(submit_semaphores[0]));
-
+    VkImageView *image_views = xmalloc(image_count * sizeof(image_views[0]));
     for (u32 i = 0; i < image_count; i++)
     {
+        VkImageViewCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        create_info.image = images[i];
+        create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        create_info.format = surface_format.format;
+        create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+        create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+        create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+        create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+        create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        create_info.subresourceRange.baseMipLevel = 0;
+        create_info.subresourceRange.levelCount = 1;
+        create_info.subresourceRange.baseArrayLayer = 0;
+        create_info.subresourceRange.layerCount = 1;
+
+        VkResult result = vkCreateImageView(ctx.vk_device, &create_info, NULL, &image_views[i]);
+        if (result != VK_SUCCESS) fatal("Failed to create image view");
+    }
+
+    VkSemaphore *submit_semaphores = xmalloc(image_count * sizeof(submit_semaphores[0]));
+    for (u32 i = 0; i < image_count; i++)
+    {
+        VkSemaphoreCreateInfo semaphore_create_info = {};
+        semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
         result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &submit_semaphores[i]);
         if (result != VK_SUCCESS) fatal("Failed to create submit semaphore");
     }
@@ -403,6 +417,7 @@ Vk_SwapchainBundle _vk_create_swapchain_bundle()
         .swapchain = swapchain,
         .image_count = image_count,
         .images = images,
+        .image_views = image_views,
         .submit_semaphores = submit_semaphores,
         .extent = capabilities.currentExtent
     };
@@ -438,7 +453,7 @@ Vk_DepthImageBundle _vk_create_depth_image_bundle()
 
     VkImage *images = xmalloc(depth_image_bundle.image_count * sizeof(images[0]));
     VkDeviceMemory *memory_list = xmalloc(depth_image_bundle.image_count * sizeof(memory_list[0]));
-
+    VkImageView *image_views = xmalloc(depth_image_bundle.image_count * sizeof(image_views[0]));
     for (u32 i = 0; i < depth_image_bundle.image_count; i++)
     {
         VkImageCreateInfo image_create_info = {};
@@ -475,10 +490,25 @@ Vk_DepthImageBundle _vk_create_depth_image_bundle()
 
         result = vkBindImageMemory(ctx.vk_device, images[i], memory_list[i], 0);
         if (result != VK_SUCCESS) fatal("Failed to bind memory for depth buffer image");
+
+        VkImageViewCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        create_info.image = images[i];
+        create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        create_info.format = depth_format;
+        create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+        create_info.subresourceRange.baseMipLevel = 0;
+        create_info.subresourceRange.levelCount = 1;
+        create_info.subresourceRange.baseArrayLayer = 0;
+        create_info.subresourceRange.layerCount = 1;
+
+        VkResult result = vkCreateImageView(ctx.vk_device, &create_info, NULL, &image_views[i]);
+        if (result != VK_SUCCESS) fatal("Failed to create image view");
     }
 
     depth_image_bundle.images = images;
     depth_image_bundle.memory_list = memory_list;
+    depth_image_bundle.image_views = image_views;
 
     return depth_image_bundle;
 }
@@ -490,7 +520,7 @@ Vk_RenderPassBundle _vk_create_render_pass_bundle(const Vk_DepthImageBundle *dep
     {
         .color_format = ctx.vk_swapchain_bundle.format.format,
         .depth_format = with_depth ? depth_image_bundle->depth_format : VK_FORMAT_UNDEFINED,
-        .render_target_count = ctx.vk_swapchain_bundle.image_count
+        .framebuffer_count = ctx.vk_swapchain_bundle.image_count
     };
 
     VkResult result;
@@ -553,80 +583,36 @@ Vk_RenderPassBundle _vk_create_render_pass_bundle(const Vk_DepthImageBundle *dep
     }
     render_pass_bundle.render_pass = render_pass;
 
-    Vk_RenderTarget *render_targets = xmalloc(render_pass_bundle.render_target_count * sizeof(render_targets[0]));
+    VkFramebuffer *framebuffers = xmalloc(render_pass_bundle.framebuffer_count * sizeof(framebuffers[0]));
+    for (u32 i = 0; i < render_pass_bundle.framebuffer_count; i++)
     {
-        for (u32 i = 0; i < render_pass_bundle.render_target_count; i++)
+        VkFramebufferCreateInfo create_info = {};
+        create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        create_info.renderPass = render_pass;
+        create_info.width = ctx.vk_swapchain_bundle.extent.width;
+        create_info.height = ctx.vk_swapchain_bundle.extent.height;
+        create_info.layers = 1;
+
+        if (with_depth)
         {
-            VkImageView color_view;
+            VkImageView attachments[] =
             {
-                VkImageViewCreateInfo create_info = {};
-                create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-                create_info.image = ctx.vk_swapchain_bundle.images[i];
-                create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                create_info.format = render_pass_bundle.color_format;
-                create_info.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-                create_info.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-                create_info.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-                create_info.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-                create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-                create_info.subresourceRange.baseMipLevel = 0;
-                create_info.subresourceRange.levelCount = 1;
-                create_info.subresourceRange.baseArrayLayer = 0;
-                create_info.subresourceRange.layerCount = 1;
-
-                VkResult result = vkCreateImageView(ctx.vk_device, &create_info, NULL, &color_view);
-                if (result != VK_SUCCESS) fatal("Failed to create image view");
-            }
-
-            VkImageView depth_view = VK_NULL_HANDLE;
-            if (with_depth)
-            {
-                VkImageViewCreateInfo create_info = {};
-                create_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-                create_info.image = ctx.vk_depth_image_bundle.images[i];
-                create_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-                create_info.format = render_pass_bundle.depth_format;
-                create_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-                create_info.subresourceRange.baseMipLevel = 0;
-                create_info.subresourceRange.levelCount = 1;
-                create_info.subresourceRange.baseArrayLayer = 0;
-                create_info.subresourceRange.layerCount = 1;
-
-                VkResult result = vkCreateImageView(ctx.vk_device, &create_info, NULL, &depth_view);
-                if (result != VK_SUCCESS) fatal("Failed to create image view");
-            }
-
-            VkFramebuffer framebuffer;
-            {
-                VkFramebufferCreateInfo create_info = {};
-                create_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-                create_info.renderPass = render_pass;
-                create_info.width = ctx.vk_swapchain_bundle.extent.width;
-                create_info.height = ctx.vk_swapchain_bundle.extent.height;
-                create_info.layers = 1;
-
-                if (with_depth)
-                {
-                    VkImageView attachments[] = { color_view, depth_view };
-                    create_info.attachmentCount = array_count(attachments);
-                    create_info.pAttachments = attachments;
-                }
-                else
-                {
-                    create_info.attachmentCount = 1;
-                    create_info.pAttachments = &color_view;
-                }
-
-                result = vkCreateFramebuffer(ctx.vk_device, &create_info, NULL, &framebuffer);
-                if (result != VK_SUCCESS) fatal("Failed to create framebuffer");
-            }
-
-            render_targets[i].color_view = color_view;
-            render_targets[i].depth_view = depth_view;
-            render_targets[i].framebuffer = framebuffer;
+                ctx.vk_swapchain_bundle.image_views[i],
+                depth_image_bundle->image_views[i]
+            };
+            create_info.attachmentCount = array_count(attachments);
+            create_info.pAttachments = attachments;
         }
+        else
+        {
+            create_info.attachmentCount = 1;
+            create_info.pAttachments = &ctx.vk_swapchain_bundle.image_views[i];
+        }
+
+        result = vkCreateFramebuffer(ctx.vk_device, &create_info, NULL, &framebuffers[i]);
+        if (result != VK_SUCCESS) fatal("Failed to create framebuffer");
     }
-    render_pass_bundle.render_targets = render_targets;
+    render_pass_bundle.framebuffers = framebuffers;
 
     return render_pass_bundle;
 }
@@ -1469,11 +1455,14 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_cubes()
 
 void _vk_destroy_swapchain_bundle(Vk_SwapchainBundle *bundle)
 {
+    free(bundle->images);
     for (u32 i = 0; i < bundle->image_count; i++)
     {
         vkDestroySemaphore(ctx.vk_device, bundle->submit_semaphores[i], NULL);
+        vkDestroyImageView(ctx.vk_device, bundle->image_views[i], NULL);
     }
     free(bundle->submit_semaphores);
+    free(bundle->image_views);
     vkDestroySwapchainKHR(ctx.vk_device, bundle->swapchain, NULL);
     *bundle = (Vk_SwapchainBundle){};
 }
@@ -1484,23 +1473,21 @@ void _vk_destroy_depth_image_bundle(Vk_DepthImageBundle *bundle)
     {
         vkDestroyImage(ctx.vk_device, bundle->images[i], NULL);
         vkFreeMemory(ctx.vk_device, bundle->memory_list[i], NULL);
+        vkDestroyImageView(ctx.vk_device, bundle->image_views[i], NULL);
     }
     free(bundle->images);
     free(bundle->memory_list);
+    free(bundle->image_views);
     *bundle = (Vk_DepthImageBundle){};
 }
 
 void _vk_destroy_render_pass_bundle(Vk_RenderPassBundle *bundle)
 {
-    for (u32 i = 0; i < bundle->render_target_count; i++)
+    for (u32 i = 0; i < bundle->framebuffer_count; i++)
     {
-        vkDestroyImageView(ctx.vk_device, bundle->render_targets[i].color_view, NULL);
-        if (bundle->depth_format != VK_FORMAT_UNDEFINED)
-        {
-            vkDestroyImageView(ctx.vk_device, bundle->render_targets[i].depth_view, NULL);
-        }
-        vkDestroyFramebuffer(ctx.vk_device, bundle->render_targets[i].framebuffer, NULL);
+        vkDestroyFramebuffer(ctx.vk_device, bundle->framebuffers[i], NULL);
     }
+    free(bundle->framebuffers);
     vkDestroyRenderPass(ctx.vk_device, bundle->render_pass, NULL);
     *bundle = (Vk_RenderPassBundle){};
 }
@@ -1831,7 +1818,7 @@ void e2r_draw()
         VkRenderPassBeginInfo render_pass_begin_info = {};
         render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         render_pass_begin_info.renderPass = ctx.vk_clear_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_clear_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.framebuffer = ctx.vk_clear_render_pass_bundle.framebuffers[next_image_index];
         render_pass_begin_info.renderArea = render_area;
         render_pass_begin_info.clearValueCount = array_count(clear_values);
         render_pass_begin_info.pClearValues = clear_values;
@@ -1851,7 +1838,7 @@ void e2r_draw()
         VkRenderPassBeginInfo render_pass_begin_info = {};
         render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         render_pass_begin_info.renderPass = ctx.vk_3d_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_3d_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.framebuffer = ctx.vk_3d_render_pass_bundle.framebuffers[next_image_index];
         render_pass_begin_info.renderArea = render_area;
         render_pass_begin_info.clearValueCount = array_count(clear_values);
         render_pass_begin_info.pClearValues = clear_values;
@@ -1885,7 +1872,7 @@ void e2r_draw()
         VkRenderPassBeginInfo render_pass_begin_info = {};
         render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         render_pass_begin_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_2d_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.framebuffer = ctx.vk_2d_render_pass_bundle.framebuffers[next_image_index];
         render_pass_begin_info.renderArea = render_area;
         render_pass_begin_info.clearValueCount = 0;
         vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -1916,7 +1903,7 @@ void e2r_draw()
         VkRenderPassBeginInfo render_pass_begin_info = {};
         render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
         render_pass_begin_info.renderPass = ctx.vk_final_render_pass_bundle.render_pass;
-        render_pass_begin_info.framebuffer = ctx.vk_final_render_pass_bundle.render_targets[next_image_index].framebuffer;
+        render_pass_begin_info.framebuffer = ctx.vk_final_render_pass_bundle.framebuffers[next_image_index];
         render_pass_begin_info.renderArea = render_area;
         render_pass_begin_info.clearValueCount = 0;
         vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);

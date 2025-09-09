@@ -22,12 +22,6 @@ layout(location = 3) out vec3 fragPos;
 void main()
 {
     gl_Position = ubo_3d.view_proj * ubo_3d.model * vec4(inPos, 1.0);
-    // mat4 proj;
-    // proj[0] = vec4(1.559, 0.000, 0.000, 0.000);
-    // proj[1] = vec4(0.000, -1.732, 0.000, 0.000);
-    // proj[2] = vec4(0.000, 0.000, -1.002, -1.000);
-    // proj[3] = vec4(0.000, 0.000, -0.200, 0.000);
-    // gl_Position = proj * vec4(vec2(inPos), 0.0, 1.0);
     fragColor = inColor;
     fragUV = inUV;
     fragNormal = mat3(transpose(inverse(ubo_3d.model))) * inNormal;
