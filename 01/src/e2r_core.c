@@ -71,6 +71,7 @@ typedef struct Vk_Frame
 {
     VkCommandBuffer command_buffer;
     VkFence in_flight_fence;
+    bool should_wait_on_fence;
     VkSemaphore acquire_semaphore;
 
 } Vk_Frame;
@@ -174,6 +175,8 @@ typedef struct E2R_Ctx
     Vk_RenderPassBundle vk_3d_render_pass_bundle;
     Vk_RenderPassBundle vk_final_render_pass_bundle;
 
+    bool first_swapchain_use;
+
     VkCommandPool vk_command_pool;
 
     Vk_FrameList vk_frame_list;
@@ -189,14 +192,28 @@ typedef struct E2R_Ctx
     Vk_PipelineBundle vk_tri_pipeline_bundle;
     Vk_PipelineBundle vk_cubes_pipeline_bundle;
 
+    bool rebuild_swapchain;
+
+} E2R_Ctx;
+
+typedef struct AppCtx
+{
     E2R_Camera camera;
 
     int cube_count;
     m4 *cube_model_transforms;
 
-} E2R_Ctx;
+    bool mouse_captured;
+    bool mouse_capture_toggle_old_press;
+
+    f64 last_mouse_x, last_mouse_y;
+    f64 mouse_dx_smoothed, mouse_dy_smoothed;
+    bool first_mouse;
+
+} AppCtx;
 
 globvar E2R_Ctx ctx;
+globvar AppCtx app_ctx;
 
 GLFWwindow *_glfw_create_window(int width, int height, const char *window_name)
 {
@@ -649,14 +666,14 @@ VkCommandPool _vk_create_command_pool()
 
 Vk_FrameList _vk_create_frame_list()
 {
-    Vk_FrameList frame_bundle =
+    Vk_FrameList frame_list =
     {
         .count = FRAMES_IN_FLIGHT,
     };
 
-    Vk_Frame *frames = xmalloc(frame_bundle.count * sizeof(frames[0]));
+    Vk_Frame *frames = xmalloc(frame_list.count * sizeof(frames[0]));
 
-    for (u32 i = 0; i < frame_bundle.count; i++)
+    for (u32 i = 0; i < frame_list.count; i++)
     {
         VkCommandBufferAllocateInfo command_buffer_allocate_info = {};
         command_buffer_allocate_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -690,9 +707,33 @@ Vk_FrameList _vk_create_frame_list()
         };
     }
 
-    frame_bundle.frames = frames;
+    frame_list.frames = frames;
 
-    return frame_bundle;
+    return frame_list;
+}
+
+void _vk_frame_list_reset_sync_objects(Vk_FrameList *frame_list)
+{
+    VkResult result;
+    for (u32 i = 0; i < frame_list->count; i++)
+    {
+        vkDestroyFence(ctx.vk_device, frame_list->frames[i].in_flight_fence, NULL);
+
+        VkFenceCreateInfo fence_create_info = {};
+        fence_create_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+        fence_create_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+        result = vkCreateFence(ctx.vk_device, &fence_create_info, NULL, &frame_list->frames[i].in_flight_fence);
+        if (result != VK_SUCCESS) fatal("Failed to create in flight fence");
+
+        vkDestroySemaphore(ctx.vk_device, frame_list->frames[i].acquire_semaphore, NULL);
+
+        VkSemaphoreCreateInfo semaphore_create_info = {};
+        semaphore_create_info.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+        result = vkCreateSemaphore(ctx.vk_device, &semaphore_create_info, NULL, &frame_list->frames[i].acquire_semaphore);
+        if (result != VK_SUCCESS) fatal("Failed to create acquire semaphore");
+    }
 }
 
 VkShaderModule _vk_create_shader_module(const char *path)
@@ -1613,6 +1654,39 @@ void _vk_destroy_pipeline_bundle(Vk_PipelineBundle *bundle)
     *bundle = (Vk_PipelineBundle){};
 }
 
+// -------------------------------
+
+void _vk_create_swapchain_dependent()
+{
+    ctx.vk_swapchain_bundle = _vk_create_swapchain_bundle();
+    ctx.vk_depth_image_bundle = _vk_create_depth_image_bundle();
+    ctx.vk_clear_render_pass_bundle = _vk_create_render_pass_bundle(NULL, true, false);
+    ctx.vk_2d_render_pass_bundle = _vk_create_render_pass_bundle(NULL, false, false);
+    ctx.vk_3d_render_pass_bundle = _vk_create_render_pass_bundle(&ctx.vk_depth_image_bundle, false, false);
+    ctx.vk_final_render_pass_bundle = _vk_create_render_pass_bundle(NULL, false, true);
+
+    ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle_tri();
+    ctx.vk_cubes_pipeline_bundle = _vk_create_pipeline_bundle_cubes();
+
+    ctx.first_swapchain_use = true;
+}
+
+void _vk_destroy_swapchain_dependent()
+{
+    vkDeviceWaitIdle(ctx.vk_device);
+
+    _vk_destroy_pipeline_bundle(&ctx.vk_cubes_pipeline_bundle);
+    _vk_destroy_pipeline_bundle(&ctx.vk_tri_pipeline_bundle);
+
+    _vk_destroy_render_pass_bundle(&ctx.vk_clear_render_pass_bundle);
+    _vk_destroy_render_pass_bundle(&ctx.vk_2d_render_pass_bundle);
+    _vk_destroy_render_pass_bundle(&ctx.vk_3d_render_pass_bundle);
+    _vk_destroy_render_pass_bundle(&ctx.vk_final_render_pass_bundle);
+
+    _vk_destroy_depth_image_bundle(&ctx.vk_depth_image_bundle);
+    _vk_destroy_swapchain_bundle(&ctx.vk_swapchain_bundle);
+}
+
 // --------------------------------
 
 void e2r_init(int width, int height, const char *name)
@@ -1625,12 +1699,6 @@ void e2r_init(int width, int height, const char *name)
     ctx.vk_device = _vk_create_device();
     ctx.vk_queue = _vk_get_queue();
 
-    ctx.vk_swapchain_bundle = _vk_create_swapchain_bundle();
-    ctx.vk_depth_image_bundle = _vk_create_depth_image_bundle();
-    ctx.vk_clear_render_pass_bundle = _vk_create_render_pass_bundle(NULL, true, false);
-    ctx.vk_2d_render_pass_bundle = _vk_create_render_pass_bundle(NULL, false, false);
-    ctx.vk_3d_render_pass_bundle = _vk_create_render_pass_bundle(&ctx.vk_depth_image_bundle, false, false);
-    ctx.vk_final_render_pass_bundle = _vk_create_render_pass_bundle(NULL, false, true);
     ctx.vk_command_pool = _vk_create_command_pool();
 
     ctx.vk_frame_list = _vk_create_frame_list();
@@ -1642,14 +1710,13 @@ void e2r_init(int width, int height, const char *name)
 
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
 
-    ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle_tri();
-    ctx.vk_cubes_pipeline_bundle = _vk_create_pipeline_bundle_cubes();
+    _vk_create_swapchain_dependent();
 
-    ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
+    app_ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
 
-    ctx.cube_count = 32;
-    ctx.cube_model_transforms = xmalloc(ctx.cube_count * sizeof(ctx.cube_model_transforms[0]));
-    for (int i = 0; i < ctx.cube_count; i++)
+    app_ctx.cube_count = 32;
+    app_ctx.cube_model_transforms = xmalloc(app_ctx.cube_count * sizeof(app_ctx.cube_model_transforms[0]));
+    for (int i = 0; i < app_ctx.cube_count; i++)
     {
         f32 rand_x = rand_float() * 3.0f - 1.5f;
         f32 rand_y = rand_float() * 3.0f - 1.5f;
@@ -1657,16 +1724,15 @@ void e2r_init(int width, int height, const char *name)
         m4 translate = m4_translate(rand_x, rand_y, rand_z);
         f32 rand_angle = rand_float() * 360.0f;
         m4 rotate = m4_rotate(deg_to_rad(rand_angle), rand_v3(1.0f));
-        ctx.cube_model_transforms[i] = m4_mul(translate, rotate);
+        app_ctx.cube_model_transforms[i] = m4_mul(translate, rotate);
     }
+
+    app_ctx.first_mouse = true;
 }
 
 void e2r_destroy()
 {
     vkDeviceWaitIdle(ctx.vk_device);
-
-    _vk_destroy_pipeline_bundle(&ctx.vk_cubes_pipeline_bundle);
-    _vk_destroy_pipeline_bundle(&ctx.vk_tri_pipeline_bundle);
 
     _vk_destroy_texture_bundle(&ctx.ducks_texture);
 
@@ -1674,17 +1740,11 @@ void e2r_destroy()
     _vk_destroy_buffer_bundle_list(&ctx.global_ubo_3d);
     _vk_destroy_buffer_bundle_list(&ctx.ubo_lighting);
 
+    _vk_destroy_swapchain_dependent();
+ 
     _vk_destroy_frame_list(&ctx.vk_frame_list);
 
     _vk_destroy_command_pool(&ctx.vk_command_pool);
-
-    _vk_destroy_render_pass_bundle(&ctx.vk_clear_render_pass_bundle);
-    _vk_destroy_render_pass_bundle(&ctx.vk_2d_render_pass_bundle);
-    _vk_destroy_render_pass_bundle(&ctx.vk_3d_render_pass_bundle);
-    _vk_destroy_render_pass_bundle(&ctx.vk_final_render_pass_bundle);
-
-    _vk_destroy_depth_image_bundle(&ctx.vk_depth_image_bundle);
-    _vk_destroy_swapchain_bundle(&ctx.vk_swapchain_bundle);
 
     vkDestroyDevice(ctx.vk_device, NULL);
     vkDestroySurfaceKHR(ctx.vk_instance, ctx.vk_surface, NULL);
@@ -1701,7 +1761,17 @@ bool e2r_is_running()
 
 void e2r_start_frame()
 {
+    if (ctx.rebuild_swapchain)
+    {
+        _vk_destroy_swapchain_dependent();
+        _vk_create_swapchain_dependent();
+        _vk_frame_list_reset_sync_objects(&ctx.vk_frame_list);
+        ctx.rebuild_swapchain = false;
+        ctx.current_vk_frame = 0;
+    }
+
     const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
+
     vkWaitForFences(ctx.vk_device, 1, &frame->in_flight_fence, true, UINT64_MAX);
     vkResetFences(ctx.vk_device, 1, &frame->in_flight_fence);
 
@@ -1717,50 +1787,59 @@ void e2r_draw()
 {
     const f32 delta = 1 / 120.0f;
 
-    // Update camera based on mouse
+    if (glfwGetKey(ctx.glfw_window, GLFW_KEY_C) == GLFW_PRESS && !app_ctx.mouse_capture_toggle_old_press)
     {
-        static f64 last_mouse_x, last_mouse_y;
-        static f64 mouse_dx_smoothed, mouse_dy_smoothed;
-        static bool first_mouse = true;
+        app_ctx.mouse_captured = !app_ctx.mouse_captured;
+        app_ctx.first_mouse = true;
+        glfwSetInputMode(ctx.glfw_window, GLFW_CURSOR, app_ctx.mouse_captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
+        app_ctx.mouse_capture_toggle_old_press = true;
+    }
+    else if (glfwGetKey(ctx.glfw_window, GLFW_KEY_C) != GLFW_PRESS)
+    {
+        app_ctx.mouse_capture_toggle_old_press = false;
+    }
 
+    // Update camera based on mouse
+    if (app_ctx.mouse_captured)
+    {
         f64 mouse_x, mouse_y;
         glfwGetCursorPos(ctx.glfw_window, &mouse_x, &mouse_y);
 
-        if (first_mouse)
+        if (app_ctx.first_mouse)
         {
-            last_mouse_x = mouse_x;
-            last_mouse_y = mouse_y;
-            first_mouse = false;
+            app_ctx.last_mouse_x = mouse_x;
+            app_ctx.last_mouse_y = mouse_y;
+            app_ctx.first_mouse = false;
         }
 
-        f64 mouse_dx = mouse_x - last_mouse_x;
-        f64 mouse_dy = mouse_y - last_mouse_y;
-        last_mouse_x = mouse_x;
-        last_mouse_y = mouse_y;
+        f64 mouse_dx = mouse_x - app_ctx.last_mouse_x;
+        f64 mouse_dy = mouse_y - app_ctx.last_mouse_y;
+        app_ctx.last_mouse_x = mouse_x;
+        app_ctx.last_mouse_y = mouse_y;
 
         const f64 factor = 0.3;
-        mouse_dx_smoothed = factor * mouse_dx_smoothed + (1.0 - factor) * mouse_dx;
-        mouse_dy_smoothed = factor * mouse_dy_smoothed + (1.0 - factor) * mouse_dy;
+        app_ctx.mouse_dx_smoothed = factor * app_ctx.mouse_dx_smoothed + (1.0 - factor) * mouse_dx;
+        app_ctx.mouse_dy_smoothed = factor * app_ctx.mouse_dy_smoothed + (1.0 - factor) * mouse_dy;
 
         f32 mouse_sens = 0.2f;
-        ctx.camera.pitch_deg -= mouse_sens * mouse_dy_smoothed;
-        ctx.camera.yaw_deg += mouse_sens * mouse_dx_smoothed;
-        if (ctx.camera.pitch_deg > 89.9f) ctx.camera.pitch_deg = 89.9f;
-        else if (ctx.camera.pitch_deg < -89.9f) ctx.camera.pitch_deg = -89.9f;
+        app_ctx.camera.pitch_deg -= mouse_sens * app_ctx.mouse_dy_smoothed;
+        app_ctx.camera.yaw_deg += mouse_sens * app_ctx.mouse_dx_smoothed;
+        if (app_ctx.camera.pitch_deg > 89.9f) app_ctx.camera.pitch_deg = 89.9f;
+        else if (app_ctx.camera.pitch_deg < -89.9f) app_ctx.camera.pitch_deg = -89.9f;
     }
 
     // Update camera based on keyboard
     {
         f32 speed = 3.0f;
-        v3 dir = e2r_camera_get_dir(&ctx.camera);
-        v3 right = e2r_camera_get_right(&ctx.camera);
-        v3 up = e2r_camera_get_up(&ctx.camera);
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_W) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(dir, speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_S) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(dir, -speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_A) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(right, speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_D) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(right, -speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_SPACE) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(up, speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) ctx.camera.pos = v3_add(ctx.camera.pos, v3_scale(up, -speed * delta));
+        v3 dir = e2r_camera_get_dir(&app_ctx.camera);
+        v3 right = e2r_camera_get_right(&app_ctx.camera);
+        v3 up = e2r_camera_get_up(&app_ctx.camera);
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_W) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_S) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, -speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_A) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_D) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, -speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_SPACE) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, speed * delta));
+        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, -speed * delta));
     }
 
     const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
@@ -1844,7 +1923,7 @@ void e2r_draw()
             memcpy(ctx.global_ubo_2d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
         }
 
-        m4 camera_view = e2r_camera_get_view(&ctx.camera);
+        m4 camera_view = e2r_camera_get_view(&app_ctx.camera);
         m4 perspective_proj = m4_proj_perspective(deg_to_rad(60), window_dim.x / window_dim.y, 0.1f, 100.0f);
         m4 view_proj = m4_mul(perspective_proj, camera_view);
 
@@ -1859,7 +1938,7 @@ void e2r_draw()
         {
             UBOLayoutLighting ubo_data =
             {
-                .view_pos = ctx.camera.pos,
+                .view_pos = app_ctx.camera.pos,
                 .ambient_strength = 0.1f,
                 .light_color = V3(1.0f, 1.0f, 1.0f),
                 .specular_strength = 0.5f,
@@ -1874,8 +1953,9 @@ void e2r_draw()
     VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->acquire_semaphore, VK_NULL_HANDLE, &next_image_index);
     if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
     {
-        // recreate_everything = true;
-        // continue;
+        trace("Out of date swapchain from vkAcquireNextImageKHR");
+        ctx.rebuild_swapchain = true;
+        return;
     }
     else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
 
@@ -1942,9 +2022,9 @@ void e2r_draw()
                 0, NULL
             );
 
-            for (int i = 0; i < ctx.cube_count; i++)
+            for (int i = 0; i < app_ctx.cube_count; i++)
             {
-                m4 model = ctx.cube_model_transforms[i];
+                m4 model = app_ctx.cube_model_transforms[i];
 
                 vkCmdPushConstants(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(m4), &model);
 
@@ -2031,8 +2111,9 @@ void e2r_draw()
         result = vkQueuePresentKHR(ctx.vk_queue, &present_info);
         if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
         {
-            // recreate_everything = true;
-            // continue;
+            ctx.rebuild_swapchain = true;
+            trace("Out of date swapchain from vkQueuePresentKHR");
+            return;
         }
         else if (result != VK_SUCCESS) fatal("Error when presenting");
     }
