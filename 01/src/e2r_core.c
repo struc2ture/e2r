@@ -16,6 +16,7 @@
 #include "common/random.h"
 #include "common/types.h"
 #include "common/util.h"
+#include "e2r_draw.h"
 
 #define FRAMES_IN_FLIGHT 2
 #define MAX_VERTEX_COUNT 1024
@@ -2434,6 +2435,7 @@ void e2r_end_frame()
 
 void e2r_draw()
 {
+    e2r_draw_quad(V2_ZERO, V2_ZERO, V4_ZERO);
     const f32 delta = 1 / 120.0f;
 
     if (glfwGetKey(ctx.glfw_window, GLFW_KEY_C) == GLFW_PRESS && !app_ctx.mouse_capture_toggle_old_press)

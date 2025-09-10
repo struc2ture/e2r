@@ -30,6 +30,34 @@
 
 #define noop() do {} while (0)
 
+#define list_grow(LIST) \
+    do { \
+        if ((LIST)->data == NULL) \
+        { \
+            (LIST)->cap = 64; \
+            (LIST)->data = xrealloc((LIST)->data, (LIST)->cap * sizeof(*(LIST)->data)); \
+        } \
+        if ((LIST)->size >= (LIST)->cap) \
+        { \
+            (LIST)->cap *= 2; \
+            (LIST)->data = xrealloc((LIST)->data, (LIST)->cap * sizeof(*(LIST)->data)); \
+        } \
+    } while (0)
+
+#define list_append(LIST, ITEM) \
+    do { \
+        list_grow((LIST)); \
+        (LIST)->data[(LIST)->size++] = (ITEM); \
+    } while (0)
+
+#define list_free(LIST) \
+    do { \
+        free((LIST)->data); \
+        (LIST)->data = NULL; \
+        (LIST)->size = 0; \
+        (LIST)->cap = 0; \
+    } while (0)
+
 static void *xmalloc(size_t size)
 {
     void *ptr = malloc(size);
@@ -42,6 +70,13 @@ static void *xcalloc(size_t size)
     void *ptr = calloc(1, size);
     if (!ptr) fatal("calloc failed for %zu", size);
     return ptr;
+}
+
+static void *xrealloc(void *data, size_t new_size)
+{
+    void *new_data = realloc(data, new_size);
+    if (!new_data) fatal("realloc failed for %zu", new_size);
+    return new_data;
 }
 
 static char *strf(const char *fmt, ...)

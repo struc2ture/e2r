@@ -48,4 +48,6 @@ static inline v4i V4I(i32 x, i32 y, i32 z, i32 w) { return (v4i){{{x, y, z, w}}}
 #define V3_UP ((v3){{{0.0f, 1.0f, 0.0f}}})
 #define V3_FORWARD ((v3){{{1.0f, 0.0f, 1.0f}}})
 
+#define V4_ZERO ((v4){{{}}})
+
 #define globvar static
