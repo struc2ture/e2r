@@ -30,12 +30,26 @@
 
 #define noop() do {} while (0)
 
+// DYNAMIC LIST -----------------------
+
+#define list_define_type(NAME, TYPE) \
+    typedef struct NAME { \
+        TYPE *data; \
+        size_t size; \
+        size_t cap; \
+    } NAME
+
+#define list_init(LIST, CAP) \
+    do { \
+        (LIST)->cap = (CAP); \
+        (LIST)->data = xrealloc((LIST)->data, (LIST)->cap * sizeof(*(LIST)->data)); \
+    } while(0)
+
 #define list_grow(LIST) \
     do { \
         if ((LIST)->data == NULL) \
         { \
-            (LIST)->cap = 64; \
-            (LIST)->data = xrealloc((LIST)->data, (LIST)->cap * sizeof(*(LIST)->data)); \
+            list_init(LIST, 64); \
         } \
         if ((LIST)->size >= (LIST)->cap) \
         { \
@@ -50,6 +64,11 @@
         (LIST)->data[(LIST)->size++] = (ITEM); \
     } while (0)
 
+#define list_clear(LIST) \
+    do { \
+        (LIST)->size = 0; \
+    } while (0)
+
 #define list_free(LIST) \
     do { \
         free((LIST)->data); \
@@ -57,6 +76,9 @@
         (LIST)->size = 0; \
         (LIST)->cap = 0; \
     } while (0)
+
+#define list_iterate(LIST, INDEX, IT) \
+    for (size_t INDEX = 0; INDEX < (LIST)->size && ((IT) = &(LIST)->data[INDEX], 1); ++INDEX) 
 
 static void *xmalloc(size_t size)
 {

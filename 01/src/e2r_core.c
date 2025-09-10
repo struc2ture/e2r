@@ -17,6 +17,7 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "e2r_draw.h"
+#include "vertex.h"
 
 #define FRAMES_IN_FLIGHT 2
 #define MAX_VERTEX_COUNT 1024
@@ -116,33 +117,6 @@ typedef struct Vk_PipelineBundle
 } Vk_PipelineBundle;
 
 // ------------------------------------
-
-typedef struct Vertex2D
-{
-    v3 pos;
-    v4 color;
-
-} Vertex2D;
-
-typedef struct VertexUI
-{
-    v3 pos;
-    v2 uv;
-    v4 color;
-
-} VertexUI;
-
-typedef struct Vertex3D
-{
-    v3 pos;
-    v3 normal;
-    v2 uv;
-    v4 color;
-
-} Vertex3D;
-
-typedef u32 VertIndex;
-#define VERT_INDEX_TYPE VK_INDEX_TYPE_UINT32
 
 typedef struct UBOLayoutGlobal2D
 {
@@ -2433,10 +2407,15 @@ void e2r_end_frame()
     ctx.current_vk_frame = (ctx.current_vk_frame + 1) % FRAMES_IN_FLIGHT;
 }
 
+f32 e2r_get_dt()
+{
+    const f32 dt = 1 / 120.0f;
+    return dt;
+}
+
 void e2r_draw()
 {
-    e2r_draw_quad(V2_ZERO, V2_ZERO, V4_ZERO);
-    const f32 delta = 1 / 120.0f;
+    f32 delta = e2r_get_dt();
 
     if (glfwGetKey(ctx.glfw_window, GLFW_KEY_C) == GLFW_PRESS && !app_ctx.mouse_capture_toggle_old_press)
     {
@@ -2510,39 +2489,13 @@ void e2r_draw()
     // UI pipeline data
     u32 ui_index_count;
     {
-        v2 quad_screen_min = V2(300.0f, 200.0f);
-        v2 quad_screen_dim = V2(24.0f, 24.0f);
+        E2R_RenderData render_data = e2r_get_render_data();
+        ui_index_count = render_data.index_list->size;
 
-        v2 quad_screen_max = v2_add(quad_screen_min, quad_screen_dim);
+        memcpy(ctx.vk_ui_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
+        memcpy(ctx.vk_ui_pipeline_bundle.index_buffer_bundle.data_ptr, render_data.index_list->data, render_data.index_list->size * sizeof(*render_data.index_list->data));
 
-        v3 quad_screen_pos[4] = {};
-        quad_screen_pos[0] = V3(quad_screen_min.x, quad_screen_min.y, 0.0f);
-        quad_screen_pos[1] = V3(quad_screen_max.x, quad_screen_min.y, 0.0f);
-        quad_screen_pos[2] = V3(quad_screen_max.x, quad_screen_max.y, 0.0f);
-        quad_screen_pos[3] = V3(quad_screen_min.x, quad_screen_max.y, 0.0f);
-
-        v2 atlas_q_verts[4] = {};
-        _ui_get_atlas_q_verts(V2I(2, 0), atlas_q_verts);
-
-        v4 color = V4(1.0f, 1.0f, 1.0f, 1.0f);
-
-        const VertexUI verts[] =
-        {
-            {quad_screen_pos[0], atlas_q_verts[0], color},
-            {quad_screen_pos[1], atlas_q_verts[1], color},
-            {quad_screen_pos[2], atlas_q_verts[2], color},
-            {quad_screen_pos[3], atlas_q_verts[3], color},
-        };
-
-        memcpy(ctx.vk_ui_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
-
-        const VertIndex indices[] =
-        {
-            0, 1, 2, 0, 2, 3
-        };
-        ui_index_count = array_count(indices);
-
-        memcpy(ctx.vk_ui_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
+        e2r_reset_draw_data();
     }
 
     // Text pipeline data
