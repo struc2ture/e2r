@@ -196,9 +196,6 @@ typedef struct AppCtx
 {
     E2R_Camera camera;
 
-    int cube_count;
-    m4 *cube_model_transforms;
-
     bool mouse_captured;
     bool mouse_capture_toggle_old_press;
 
@@ -2342,19 +2339,6 @@ void e2r_init(int width, int height, const char *name)
 
     app_ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
 
-    app_ctx.cube_count = 32;
-    app_ctx.cube_model_transforms = xmalloc(app_ctx.cube_count * sizeof(app_ctx.cube_model_transforms[0]));
-    for (int i = 0; i < app_ctx.cube_count; i++)
-    {
-        f32 rand_x = rand_float() * 3.0f - 1.5f;
-        f32 rand_y = rand_float() * 3.0f - 1.5f;
-        f32 rand_z = rand_float() * 3.0f - 1.5f;
-        m4 translate = m4_translate(rand_x, rand_y, rand_z);
-        f32 rand_angle = rand_float() * 360.0f;
-        m4 rotate = m4_rotate(deg_to_rad(rand_angle), rand_v3(1.0f));
-        app_ctx.cube_model_transforms[i] = m4_mul(translate, rotate);
-    }
-
     app_ctx.first_mouse = true;
 }
 
@@ -2483,7 +2467,7 @@ void e2r_submit_vert_data_TEMP()
 {
     // UI pipeline data
     {
-        E2R_RenderData render_data = e2r_get_ui_render_data();
+        E2R_UIRenderData render_data = e2r_get_ui_render_data();
         ctx.ui_index_count = render_data.index_list->size;
 
         memcpy(ctx.vk_ui_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
@@ -2494,7 +2478,7 @@ void e2r_submit_vert_data_TEMP()
 
     // Text pipeline data
     {
-        E2R_RenderData render_data = e2r_get_text_render_data();
+        E2R_UIRenderData render_data = e2r_get_text_render_data();
         ctx.text_index_count = render_data.index_list->size;
 
         memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
@@ -2505,54 +2489,11 @@ void e2r_submit_vert_data_TEMP()
 
     // Cubes pipeline data
     {
-        const Vertex3D verts[] =
-        {
-            // a
-            { V3(-0.5f, -0.5f, -0.5f), V3( 0.0f, -1.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 0
-            { V3( 0.5f, -0.5f, -0.5f), V3( 0.0f, -1.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 1
-            { V3( 0.5f, -0.5f,  0.5f), V3( 0.0f, -1.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 2
-            { V3(-0.5f, -0.5f,  0.5f), V3( 0.0f, -1.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 3
-            // b
-            { V3(-0.5f,  0.5f,  0.5f), V3( 0.0f,  1.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 4
-            { V3( 0.5f,  0.5f,  0.5f), V3( 0.0f,  1.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 5
-            { V3( 0.5f,  0.5f, -0.5f), V3( 0.0f,  1.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 6
-            { V3(-0.5f,  0.5f, -0.5f), V3( 0.0f,  1.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 7
-            // c
-            { V3(-0.5f, -0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 8
-            { V3( 0.5f, -0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 9
-            { V3( 0.5f,  0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 10
-            { V3(-0.5f,  0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 11
-            // d
-            { V3( 0.5f, -0.5f,  0.5f), V3( 1.0f,  0.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 12
-            { V3( 0.5f, -0.5f, -0.5f), V3( 1.0f,  0.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 13
-            { V3( 0.5f,  0.5f, -0.5f), V3( 1.0f,  0.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 14
-            { V3( 0.5f,  0.5f,  0.5f), V3( 1.0f,  0.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 15
-            // e
-            { V3( 0.5f, -0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 16
-            { V3(-0.5f, -0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 17
-            { V3(-0.5f,  0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 18
-            { V3( 0.5f,  0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 19
-            // f
-            { V3(-0.5f, -0.5f, -0.5f), V3(-1.0f,  0.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 20
-            { V3(-0.5f, -0.5f,  0.5f), V3(-1.0f,  0.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 21
-            { V3(-0.5f,  0.5f,  0.5f), V3(-1.0f,  0.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 22
-            { V3(-0.5f,  0.5f, -0.5f), V3(-1.0f,  0.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 23
-        };
+        E2R_3DRenderData render_data = e2r_get_cubes_render_data();
+        ctx.cubes_index_count = render_data.index_list->size;
 
-        memcpy(ctx.vk_cubes_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
-
-        const VertIndex indices[] =
-        {
-            0,  1,  2,  0,  2,  3, // a
-            4,  5,  6,  4,  6,  7, // b
-            8,  9, 10,  8, 10, 11, // c
-            12, 13, 14, 12, 14, 15, // d
-            16, 17, 18, 16, 18, 19, // e
-            20, 21, 22, 20, 22, 23, // f
-        };
-        ctx.cubes_index_count = array_count(indices);
-
-        memcpy(ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
+        memcpy(ctx.vk_cubes_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
+        memcpy(ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.data_ptr, render_data.index_list->data, render_data.index_list->size * sizeof(*render_data.index_list->data));
     }
 }
 
@@ -2680,14 +2621,15 @@ void e2r_render()
                 0, NULL
             );
 
-            for (int i = 0; i < app_ctx.cube_count; i++)
+            const E2R_3DDrawCallList *draw_calls = e2r_get_cubes_draw_calls();
+            E2R_3DDrawCall *draw_call;
+            list_iterate(draw_calls, draw_call_i, draw_call)
             {
-                m4 model = app_ctx.cube_model_transforms[i];
-
-                vkCmdPushConstants(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(m4), &model);
-
+                vkCmdPushConstants(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(m4), &draw_call->model);
                 vkCmdDrawIndexed(frame->command_buffer, ctx.cubes_index_count, 1, 0, 0, 0);
             }
+            e2r_reset_cubes_data();
+
             ctx.cubes_index_count = 0;
 
             vkCmdEndRenderPass(frame->command_buffer);

@@ -29,20 +29,30 @@ typedef struct _TextQuad
 
 } _TextQuad;
 
+typedef struct _Cube
+{
+    m4 model;
+
+} _Cube;
 
 list_define_type(_UIQuadList, _UIQuad);
 list_define_type(_TextQuadList, _TextQuad);
+list_define_type(_CubeList, _Cube);
 
 typedef struct _DrawData
 {
     _UIQuadList ui_quad_list;
-    _TextQuadList text_quad_list;
-
-    E2R_VertList ui_vert_list;
+    E2R_UIVertList ui_vert_list;
     E2R_IndexList ui_index_list;
 
-    E2R_VertList text_vert_list;
+    _TextQuadList text_quad_list;
+    E2R_UIVertList text_vert_list;
     E2R_IndexList text_index_list;
+
+    _CubeList cube_list;
+    E2R_3DVertList cube_vert_list;
+    E2R_IndexList cube_index_list;
+    E2R_3DDrawCallList cube_draw_call_list;
 
 } _DrawData;
 
@@ -173,10 +183,10 @@ void e2r_draw_string(const char *str, f32 *pen_x, f32 *pen_y, const FontAtlas *f
     }
 }
 
-E2R_RenderData e2r_get_ui_render_data()
+E2R_UIRenderData e2r_get_ui_render_data()
 {
     _UIQuadList *ui_quad_list = &draw_data.ui_quad_list;
-    E2R_VertList *vert_list = &draw_data.ui_vert_list;
+    E2R_UIVertList *vert_list = &draw_data.ui_vert_list;
     E2R_IndexList *index_list = &draw_data.ui_index_list;
 
     const _UIQuad *quad;
@@ -216,16 +226,16 @@ E2R_RenderData e2r_get_ui_render_data()
         }
     }
 
-    return (E2R_RenderData){
+    return (E2R_UIRenderData){
         .vert_list = vert_list,
         .index_list = index_list
     };
 }
 
-E2R_RenderData e2r_get_text_render_data()
+E2R_UIRenderData e2r_get_text_render_data()
 {
     _TextQuadList *quad_list = &draw_data.text_quad_list;
-    E2R_VertList *vert_list = &draw_data.text_vert_list;
+    E2R_UIVertList *vert_list = &draw_data.text_vert_list;
     E2R_IndexList *index_list = &draw_data.text_index_list;
 
     const _TextQuad *quad;
@@ -270,8 +280,103 @@ E2R_RenderData e2r_get_text_render_data()
         }
     }
 
-    return (E2R_RenderData){
+    return (E2R_UIRenderData){
         .vert_list = vert_list,
         .index_list = index_list
     };
+}
+
+void e2r_draw_cube(m4 model)
+{
+    _Cube cube =
+    {
+        .model = model
+    };
+
+    list_append(&draw_data.cube_list, cube);
+}
+
+E2R_3DRenderData e2r_get_cubes_render_data()
+{
+    E2R_3DVertList *vert_list = &draw_data.cube_vert_list;
+    E2R_IndexList *index_list = &draw_data.cube_index_list;
+
+    const Vertex3D verts[] =
+    {
+        // a
+        { V3(-0.5f, -0.5f, -0.5f), V3( 0.0f, -1.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 0
+        { V3( 0.5f, -0.5f, -0.5f), V3( 0.0f, -1.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 1
+        { V3( 0.5f, -0.5f,  0.5f), V3( 0.0f, -1.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 2
+        { V3(-0.5f, -0.5f,  0.5f), V3( 0.0f, -1.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 3
+        // b
+        { V3(-0.5f,  0.5f,  0.5f), V3( 0.0f,  1.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 4
+        { V3( 0.5f,  0.5f,  0.5f), V3( 0.0f,  1.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 5
+        { V3( 0.5f,  0.5f, -0.5f), V3( 0.0f,  1.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 6
+        { V3(-0.5f,  0.5f, -0.5f), V3( 0.0f,  1.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 7
+        // c
+        { V3(-0.5f, -0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 8
+        { V3( 0.5f, -0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 9
+        { V3( 0.5f,  0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 10
+        { V3(-0.5f,  0.5f,  0.5f), V3( 0.0f,  0.0f,  1.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 11
+        // d
+        { V3( 0.5f, -0.5f,  0.5f), V3( 1.0f,  0.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 12
+        { V3( 0.5f, -0.5f, -0.5f), V3( 1.0f,  0.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 13
+        { V3( 0.5f,  0.5f, -0.5f), V3( 1.0f,  0.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 14
+        { V3( 0.5f,  0.5f,  0.5f), V3( 1.0f,  0.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 15
+        // e
+        { V3( 0.5f, -0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 16
+        { V3(-0.5f, -0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 17
+        { V3(-0.5f,  0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 18
+        { V3( 0.5f,  0.5f, -0.5f), V3( 0.0f,  0.0f, -1.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 19
+        // f
+        { V3(-0.5f, -0.5f, -0.5f), V3(-1.0f,  0.0f,  0.0f), V2(0.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 20
+        { V3(-0.5f, -0.5f,  0.5f), V3(-1.0f,  0.0f,  0.0f), V2(1.0f, 0.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 21
+        { V3(-0.5f,  0.5f,  0.5f), V3(-1.0f,  0.0f,  0.0f), V2(1.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 22
+        { V3(-0.5f,  0.5f, -0.5f), V3(-1.0f,  0.0f,  0.0f), V2(0.0f, 1.0f), V4(0.9f, 0.9f, 0.8f, 1.0f) }, // 23
+    };
+    for (size_t i = 0; i < array_count(verts); i++)
+    {
+        list_append(vert_list, verts[i]);
+    }
+
+    const VertIndex indices[] =
+    {
+        0,  1,  2,  0,  2,  3, // a
+        4,  5,  6,  4,  6,  7, // b
+        8,  9, 10,  8, 10, 11, // c
+        12, 13, 14, 12, 14, 15, // d
+        16, 17, 18, 16, 18, 19, // e
+        20, 21, 22, 20, 22, 23, // f
+    };
+    for (size_t i = 0; i < array_count(indices); i++)
+    {
+        list_append(index_list, indices[i]);
+    }
+
+    return (E2R_3DRenderData){
+        .vert_list = vert_list,
+        .index_list = index_list
+    };
+}
+
+const E2R_3DDrawCallList *e2r_get_cubes_draw_calls()
+{
+    _Cube *cube;
+    list_iterate(&draw_data.cube_list, cube_i, cube)
+    {
+        E2R_3DDrawCall draw_call =
+        {
+            .model = cube->model
+        };
+        list_append(&draw_data.cube_draw_call_list, draw_call);
+    }
+    return &draw_data.cube_draw_call_list;
+}
+
+void e2r_reset_cubes_data()
+{
+    list_clear(&draw_data.cube_list);
+    list_clear(&draw_data.cube_vert_list);
+    list_clear(&draw_data.cube_index_list);
+    list_clear(&draw_data.cube_draw_call_list);
 }
