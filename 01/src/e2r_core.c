@@ -166,7 +166,6 @@ typedef struct E2R_Ctx
     VkCommandPool vk_command_pool;
 
     Vk_FrameList vk_frame_list;
-    u32 current_vk_frame;
 
     Vk_BufferBundleList global_ubo_2d;
     Vk_BufferBundleList global_ubo_3d;
@@ -183,6 +182,13 @@ typedef struct E2R_Ctx
     Vk_PipelineBundle vk_cubes_pipeline_bundle;
 
     bool rebuild_swapchain;
+
+    u32 current_vk_frame;
+    u32 current_swapchain_image;
+
+    u32 cubes_index_count;
+    u32 ui_index_count;
+    u32 text_index_count;
 
 } E2R_Ctx;
 
@@ -2352,6 +2358,11 @@ void e2r_init(int width, int height, const char *name)
     app_ctx.first_mouse = true;
 }
 
+const FontAtlas *e2r_get_font_atlas_TEMP()
+{
+    return &app_ctx.font_atlas;
+}
+
 void e2r_destroy()
 {
     vkDeviceWaitIdle(ctx.vk_device);
@@ -2402,18 +2413,13 @@ void e2r_start_frame()
     glfwPollEvents();
 }
 
-void e2r_end_frame()
-{
-    ctx.current_vk_frame = (ctx.current_vk_frame + 1) % FRAMES_IN_FLIGHT;
-}
-
 f32 e2r_get_dt()
 {
     const f32 dt = 1 / 120.0f;
     return dt;
 }
 
-void e2r_draw()
+void e2r_controls_TEMP()
 {
     f32 delta = e2r_get_dt();
 
@@ -2471,83 +2477,33 @@ void e2r_draw()
         if (glfwGetKey(ctx.glfw_window, GLFW_KEY_SPACE) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, speed * delta));
         if (glfwGetKey(ctx.glfw_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, -speed * delta));
     }
+}
 
-    const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
-
-    // Tri pipeline data
-    {
-        const Vertex2D verts[] =
-        {
-            {V3(100.0f, 200.0f, 0.0f), V4(1.0f, 0.0f, 0.0f, 1.0f)},
-            {V3(200.0f, 200.0f, 0.0f), V4(0.0f, 1.0f, 0.0f, 1.0f)},
-            {V3(150.0f, 100.0f, 0.0f), V4(0.0f, 0.0f, 1.0f, 1.0f)},
-        };
-
-        memcpy(ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, sizeof(verts));
-    }
-
+void e2r_submit_vert_data_TEMP()
+{
     // UI pipeline data
-    u32 ui_index_count;
     {
-        E2R_RenderData render_data = e2r_get_render_data();
-        ui_index_count = render_data.index_list->size;
+        E2R_RenderData render_data = e2r_get_ui_render_data();
+        ctx.ui_index_count = render_data.index_list->size;
 
         memcpy(ctx.vk_ui_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
         memcpy(ctx.vk_ui_pipeline_bundle.index_buffer_bundle.data_ptr, render_data.index_list->data, render_data.index_list->size * sizeof(*render_data.index_list->data));
 
-        e2r_reset_draw_data();
+        e2r_reset_ui_data();
     }
 
     // Text pipeline data
-    u32 text_index_count;
     {
-        f32 pen_x = 600.0f;
-        f32 pen_y = 600.0f;
+        E2R_RenderData render_data = e2r_get_text_render_data();
+        ctx.text_index_count = render_data.index_list->size;
 
-        const char *str = "Hello, world!";
-        const int len = strlen(str);
+        memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
+        memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, render_data.index_list->data, render_data.index_list->size * sizeof(*render_data.index_list->data));
 
-        VertexUI *verts = xmalloc(MAX_VERTEX_COUNT * sizeof(verts[0]));
-        VertIndex *indices = xmalloc(MAX_INDEX_COUNT * sizeof(indices[0]));
-        u32 vert_count = 0;
-        u32 index_count = 0;
-        for (int str_i = 0; str_i < len; str_i++)
-        {
-            v2 screen_verts[4];
-            v2 tex_verts[4];
-            _text_get_font_atlas_verts(str[str_i], &pen_x, &pen_y, &app_ctx.font_atlas, screen_verts, tex_verts);
-            v4 color = V4(1.0f, 1.0f, 1.0f, 1.0f);
-
-            u32 base_index = vert_count;
-            for (int i = 0; i < 4; i++)
-            {
-                verts[vert_count++] = (VertexUI){
-                    .pos = V3(screen_verts[i].x, screen_verts[i].y, 0.0f),
-                    .uv = tex_verts[i],
-                    .color = color
-                };
-            }
-
-            indices[index_count++] = 0 + base_index;
-            indices[index_count++] = 1 + base_index;
-            indices[index_count++] = 2 + base_index;
-            indices[index_count++] = 0 + base_index;
-            indices[index_count++] = 2 + base_index;
-            indices[index_count++] = 3 + base_index;
-        }
-
-        memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, verts, vert_count * sizeof(VertexUI));
-
-        text_index_count = index_count;
-
-        memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, indices, index_count * sizeof(VertIndex));
-
-        free(verts);
-        free(indices);
+        e2r_reset_text_data();
     }
 
     // Cubes pipeline data
-    u32 cubes_index_count;
     {
         const Vertex3D verts[] =
         {
@@ -2594,11 +2550,14 @@ void e2r_draw()
             16, 17, 18, 16, 18, 19, // e
             20, 21, 22, 20, 22, 23, // f
         };
-        cubes_index_count = array_count(indices);
+        ctx.cubes_index_count = array_count(indices);
 
         memcpy(ctx.vk_cubes_pipeline_bundle.index_buffer_bundle.data_ptr, indices, sizeof(indices));
     }
+}
 
+void e2r_submit_ubos_TEMP()
+{
     // UBOs
     {
         v2 window_dim = _glfw_get_window_size();
@@ -2638,9 +2597,12 @@ void e2r_draw()
             memcpy(ctx.ubo_lighting.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
         }
     }
+}
 
-    u32 next_image_index;
-    VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->acquire_semaphore, VK_NULL_HANDLE, &next_image_index);
+void e2r_acquire_next_image()
+{
+    const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
+    VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->acquire_semaphore, VK_NULL_HANDLE, &ctx.current_swapchain_image);
     if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
     {
         trace("Out of date swapchain from vkAcquireNextImageKHR");
@@ -2648,6 +2610,12 @@ void e2r_draw()
         return;
     }
     else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
+}
+
+void e2r_render()
+{
+    VkResult result;
+    const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
 
     // Render
     {
@@ -2671,7 +2639,7 @@ void e2r_draw()
             VkRenderPassBeginInfo render_pass_begin_info = {};
             render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             render_pass_begin_info.renderPass = ctx.vk_clear_render_pass_bundle.render_pass;
-            render_pass_begin_info.framebuffer = ctx.vk_clear_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.framebuffer = ctx.vk_clear_render_pass_bundle.framebuffers[ctx.current_swapchain_image];
             render_pass_begin_info.renderArea = render_area;
             render_pass_begin_info.clearValueCount = array_count(clear_values);
             render_pass_begin_info.pClearValues = clear_values;
@@ -2691,7 +2659,7 @@ void e2r_draw()
             VkRenderPassBeginInfo render_pass_begin_info = {};
             render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             render_pass_begin_info.renderPass = ctx.vk_3d_render_pass_bundle.render_pass;
-            render_pass_begin_info.framebuffer = ctx.vk_3d_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.framebuffer = ctx.vk_3d_render_pass_bundle.framebuffers[ctx.current_swapchain_image];
             render_pass_begin_info.renderArea = render_area;
             render_pass_begin_info.clearValueCount = array_count(clear_values);
             render_pass_begin_info.pClearValues = clear_values;
@@ -2718,8 +2686,9 @@ void e2r_draw()
 
                 vkCmdPushConstants(frame->command_buffer, ctx.vk_cubes_pipeline_bundle.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(m4), &model);
 
-                vkCmdDrawIndexed(frame->command_buffer, cubes_index_count, 1, 0, 0, 0);
+                vkCmdDrawIndexed(frame->command_buffer, ctx.cubes_index_count, 1, 0, 0, 0);
             }
+            ctx.cubes_index_count = 0;
 
             vkCmdEndRenderPass(frame->command_buffer);
         }
@@ -2732,7 +2701,7 @@ void e2r_draw()
             VkRenderPassBeginInfo render_pass_begin_info = {};
             render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             render_pass_begin_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
-            render_pass_begin_info.framebuffer = ctx.vk_2d_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.framebuffer = ctx.vk_2d_render_pass_bundle.framebuffers[ctx.current_swapchain_image];
             render_pass_begin_info.renderArea = render_area;
             render_pass_begin_info.clearValueCount = 0;
             vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -2768,7 +2737,8 @@ void e2r_draw()
                     0, NULL
                 );
 
-                vkCmdDrawIndexed(frame->command_buffer, ui_index_count, 1, 0, 0, 0);
+                vkCmdDrawIndexed(frame->command_buffer, ctx.ui_index_count, 1, 0, 0, 0);
+                ctx.ui_index_count = 0;
             }
 
             vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_text_pipeline_bundle.pipeline);
@@ -2786,7 +2756,8 @@ void e2r_draw()
                     0, NULL
                 );
 
-                vkCmdDrawIndexed(frame->command_buffer, text_index_count, 1, 0, 0, 0);
+                vkCmdDrawIndexed(frame->command_buffer, ctx.text_index_count, 1, 0, 0, 0);
+                ctx.text_index_count = 0;
             }
 
             vkCmdEndRenderPass(frame->command_buffer);
@@ -2800,7 +2771,7 @@ void e2r_draw()
             VkRenderPassBeginInfo render_pass_begin_info = {};
             render_pass_begin_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
             render_pass_begin_info.renderPass = ctx.vk_final_render_pass_bundle.render_pass;
-            render_pass_begin_info.framebuffer = ctx.vk_final_render_pass_bundle.framebuffers[next_image_index];
+            render_pass_begin_info.framebuffer = ctx.vk_final_render_pass_bundle.framebuffers[ctx.current_swapchain_image];
             render_pass_begin_info.renderArea = render_area;
             render_pass_begin_info.clearValueCount = 0;
             vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
@@ -2820,21 +2791,26 @@ void e2r_draw()
         submit_info.commandBufferCount = 1;
         submit_info.pCommandBuffers = &frame->command_buffer;
         submit_info.signalSemaphoreCount = 1;
-        submit_info.pSignalSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
+        submit_info.pSignalSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[ctx.current_swapchain_image];
 
         result = vkQueueSubmit(ctx.vk_queue, 1, &submit_info, frame->in_flight_fence);
         if (result != VK_SUCCESS) fatal("Failed to submit command buffer to queue");
     }
+}
+
+void e2r_present()
+{
+    VkResult result;
 
     // Present
     {
         VkPresentInfoKHR present_info = {};
         present_info.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
         present_info.waitSemaphoreCount = 1;
-        present_info.pWaitSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[next_image_index];
+        present_info.pWaitSemaphores = &ctx.vk_swapchain_bundle.submit_semaphores[ctx.current_swapchain_image];
         present_info.swapchainCount = 1;
         present_info.pSwapchains = &ctx.vk_swapchain_bundle.swapchain;
-        present_info.pImageIndices = &next_image_index;
+        present_info.pImageIndices = &ctx.current_swapchain_image;
         result = vkQueuePresentKHR(ctx.vk_queue, &present_info);
         if (result == VK_SUBOPTIMAL_KHR || result == VK_ERROR_OUT_OF_DATE_KHR)
         {
@@ -2844,4 +2820,14 @@ void e2r_draw()
         }
         else if (result != VK_SUCCESS) fatal("Error when presenting");
     }
+}
+
+void e2r_end_frame()
+{
+    e2r_submit_vert_data_TEMP();
+    e2r_submit_ubos_TEMP();
+    e2r_acquire_next_image();
+    e2r_render();
+    e2r_present();
+    ctx.current_vk_frame = (ctx.current_vk_frame + 1) % FRAMES_IN_FLIGHT;
 }
