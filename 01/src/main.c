@@ -136,6 +136,7 @@ int main()
     app_ctx.light_pos = V3(10.0f, 0.0f, 0.0f);
 
     E2R_UI_Window window = {};
+    E2R_UI_Window window2 = {};
 
     while (e2r_is_running())
     {
@@ -193,6 +194,16 @@ int main()
             e2r_ui_draw_text("Line 3\n");
             e2r_ui_end_window();
         }
+        
+        window.pos.x += dt * speed;
+
+        // if (e2r_ui_begin_window(&window2))
+        // {
+        //     e2r_ui_draw_text("Line a\n");
+        //     e2r_ui_draw_text("Line b\n");
+        //     e2r_ui_draw_text("Line c\n");
+        //     e2r_ui_end_window();
+        // }
 
         m4 *transform;
         list_iterate(&app_ctx.transform_list, i, transform)

@@ -2419,6 +2419,18 @@ void e2r_set_light_data(
     ctx.light_shininess = shininess;
 }
 
+v2 e2r_get_mouse_pos()
+{
+    double x64, y64;
+    glfwGetCursorPos(ctx.glfw_window, &x64, &y64);
+    return V2(x64, y64);
+}
+
+bool e2r_get_mouse_clicked()
+{
+    return glfwGetMouseButton(ctx.glfw_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+}
+
 // --------------------------------------------
 
 void _e2r_submit_vert_data()

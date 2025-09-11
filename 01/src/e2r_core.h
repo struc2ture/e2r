@@ -22,4 +22,6 @@ void e2r_set_light_data(
     f32 specular_strength,
     v3 pos,
     f32 shininess);
+v2 e2r_get_mouse_pos();
+bool e2r_get_mouse_clicked();
 const FontAtlas *e2r_get_font_atlas_TEMP();
