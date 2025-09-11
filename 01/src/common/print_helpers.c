@@ -29,3 +29,8 @@ void print_m4_cols(m4 m)
         printf(");\n");
     }
 }
+
+void print_v2(v2 v)
+{
+    printf("v2(%.3f, %.3f)\n", v.x, v.y);
+}
