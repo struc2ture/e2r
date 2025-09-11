@@ -190,25 +190,20 @@ typedef struct E2R_Ctx
     u32 ui_index_count;
     u32 text_index_count;
 
-} E2R_Ctx;
-
-typedef struct AppCtx
-{
-    E2R_Camera camera;
-
-    bool mouse_captured;
-    bool mouse_capture_toggle_old_press;
-
-    f64 last_mouse_x, last_mouse_y;
-    f64 mouse_dx_smoothed, mouse_dy_smoothed;
-    bool first_mouse;
-
     FontAtlas font_atlas;
 
-} AppCtx;
+    m4 view_transform;
+    v3 view_pos;
+
+    f32 light_ambient_strength;
+    v3 light_color;
+    f32 light_specular_strength;
+    v3 light_pos;
+    f32 light_shininess;
+
+} E2R_Ctx;
 
 globvar E2R_Ctx ctx;
-globvar AppCtx app_ctx;
 
 GLFWwindow *_glfw_create_window(int width, int height, const char *window_name)
 {
@@ -2332,19 +2327,20 @@ void e2r_init(int width, int height, const char *name)
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
     ctx.ui_atlas_texture = _vk_load_texture("res/ui_atlas.png");
 
-    app_ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 32.0f, 2.0f);
-    ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&app_ctx.font_atlas);
+    ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 32.0f, 2.0f);
+    ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&ctx.font_atlas);
 
     _vk_create_swapchain_dependent();
-
-    app_ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
-
-    app_ctx.first_mouse = true;
 }
 
 const FontAtlas *e2r_get_font_atlas_TEMP()
 {
-    return &app_ctx.font_atlas;
+    return &ctx.font_atlas;
+}
+
+GLFWwindow *e2r_get_glfw_window_TEMP()
+{
+    return ctx.glfw_window;
 }
 
 void e2r_destroy()
@@ -2403,67 +2399,29 @@ f32 e2r_get_dt()
     return dt;
 }
 
-void e2r_controls_TEMP()
+void e2r_set_view_data(m4 view, v3 view_pos)
 {
-    f32 delta = e2r_get_dt();
-
-    if (glfwGetKey(ctx.glfw_window, GLFW_KEY_C) == GLFW_PRESS && !app_ctx.mouse_capture_toggle_old_press)
-    {
-        app_ctx.mouse_captured = !app_ctx.mouse_captured;
-        app_ctx.first_mouse = true;
-        glfwSetInputMode(ctx.glfw_window, GLFW_CURSOR, app_ctx.mouse_captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-        app_ctx.mouse_capture_toggle_old_press = true;
-    }
-    else if (glfwGetKey(ctx.glfw_window, GLFW_KEY_C) != GLFW_PRESS)
-    {
-        app_ctx.mouse_capture_toggle_old_press = false;
-    }
-
-    // Update camera based on mouse
-    if (app_ctx.mouse_captured)
-    {
-        f64 mouse_x, mouse_y;
-        glfwGetCursorPos(ctx.glfw_window, &mouse_x, &mouse_y);
-
-        if (app_ctx.first_mouse)
-        {
-            app_ctx.last_mouse_x = mouse_x;
-            app_ctx.last_mouse_y = mouse_y;
-            app_ctx.first_mouse = false;
-        }
-
-        f64 mouse_dx = mouse_x - app_ctx.last_mouse_x;
-        f64 mouse_dy = mouse_y - app_ctx.last_mouse_y;
-        app_ctx.last_mouse_x = mouse_x;
-        app_ctx.last_mouse_y = mouse_y;
-
-        const f64 factor = 0.3;
-        app_ctx.mouse_dx_smoothed = factor * app_ctx.mouse_dx_smoothed + (1.0 - factor) * mouse_dx;
-        app_ctx.mouse_dy_smoothed = factor * app_ctx.mouse_dy_smoothed + (1.0 - factor) * mouse_dy;
-
-        f32 mouse_sens = 0.2f;
-        app_ctx.camera.pitch_deg -= mouse_sens * app_ctx.mouse_dy_smoothed;
-        app_ctx.camera.yaw_deg += mouse_sens * app_ctx.mouse_dx_smoothed;
-        if (app_ctx.camera.pitch_deg > 89.9f) app_ctx.camera.pitch_deg = 89.9f;
-        else if (app_ctx.camera.pitch_deg < -89.9f) app_ctx.camera.pitch_deg = -89.9f;
-    }
-
-    // Update camera based on keyboard
-    {
-        f32 speed = 3.0f;
-        v3 dir = e2r_camera_get_dir(&app_ctx.camera);
-        v3 right = e2r_camera_get_right(&app_ctx.camera);
-        v3 up = e2r_camera_get_up(&app_ctx.camera);
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_W) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_S) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, -speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_A) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_D) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, -speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_SPACE) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, speed * delta));
-        if (glfwGetKey(ctx.glfw_window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, -speed * delta));
-    }
+    ctx.view_transform = view;
+    ctx.view_pos = view_pos;
 }
 
-void e2r_submit_vert_data_TEMP()
+void e2r_set_light_data(
+    f32 ambient_strength,
+    v3 color,
+    f32 specular_strength,
+    v3 pos,
+    f32 shininess)
+{
+    ctx.light_ambient_strength = ambient_strength;
+    ctx.light_color = color;
+    ctx.light_specular_strength = specular_strength;
+    ctx.light_pos = pos;
+    ctx.light_shininess = shininess;
+}
+
+// --------------------------------------------
+
+void _e2r_submit_vert_data()
 {
     // UI pipeline data
     {
@@ -2497,7 +2455,7 @@ void e2r_submit_vert_data_TEMP()
     }
 }
 
-void e2r_submit_ubos_TEMP()
+void _e2r_submit_ubos()
 {
     // UBOs
     {
@@ -2513,9 +2471,8 @@ void e2r_submit_ubos_TEMP()
             memcpy(ctx.global_ubo_2d.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
         }
 
-        m4 camera_view = e2r_camera_get_view(&app_ctx.camera);
         m4 perspective_proj = m4_proj_perspective(deg_to_rad(60), window_dim.x / window_dim.y, 0.1f, 100.0f);
-        m4 view_proj = m4_mul(perspective_proj, camera_view);
+        m4 view_proj = m4_mul(perspective_proj, ctx.view_transform);
 
         {
             UBOLayoutGlobal3D ubo_data =
@@ -2528,19 +2485,19 @@ void e2r_submit_ubos_TEMP()
         {
             UBOLayoutLighting ubo_data =
             {
-                .view_pos = app_ctx.camera.pos,
-                .ambient_strength = 0.1f,
-                .light_color = V3(1.0f, 1.0f, 1.0f),
-                .specular_strength = 0.5f,
-                .light_pos = V3(0.0f, 10.0f, 0.0f),
-                .shininess = 1024.0f,
+                .view_pos = ctx.view_pos,
+                .ambient_strength = ctx.light_ambient_strength,
+                .light_color = ctx.light_color,
+                .specular_strength = ctx.light_specular_strength,
+                .light_pos = ctx.light_pos,
+                .shininess = ctx.light_shininess,
             };
             memcpy(ctx.ubo_lighting.buffer_bundles[ctx.current_vk_frame].data_ptr, &ubo_data, sizeof(ubo_data));
         }
     }
 }
 
-void e2r_acquire_next_image()
+void _e2r_acquire_next_image()
 {
     const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
     VkResult result = vkAcquireNextImageKHR(ctx.vk_device, ctx.vk_swapchain_bundle.swapchain, UINT64_MAX, frame->acquire_semaphore, VK_NULL_HANDLE, &ctx.current_swapchain_image);
@@ -2553,7 +2510,7 @@ void e2r_acquire_next_image()
     else if (result != VK_SUCCESS) fatal("Failed to acquire next image");
 }
 
-void e2r_render()
+void _e2r_render()
 {
     VkResult result;
     const Vk_Frame *frame = &ctx.vk_frame_list.frames[ctx.current_vk_frame];
@@ -2571,7 +2528,7 @@ void e2r_render()
         // Clear Render pass
         {
             VkClearValue clear_values[] = {
-                [0].color = (VkClearColorValue){{1.0f, 1.0f, 0.0f, 1.0f}},
+                [0].color = (VkClearColorValue){{0.6f, 0.6f, 0.6f, 1.0f}},
                 [1].depthStencil = (VkClearDepthStencilValue){1.0f, 0}
             };
             VkRect2D render_area = {};
@@ -2740,7 +2697,7 @@ void e2r_render()
     }
 }
 
-void e2r_present()
+void _e2r_present()
 {
     VkResult result;
 
@@ -2764,12 +2721,14 @@ void e2r_present()
     }
 }
 
+// --------------------------------------------
+
 void e2r_end_frame()
 {
-    e2r_submit_vert_data_TEMP();
-    e2r_submit_ubos_TEMP();
-    e2r_acquire_next_image();
-    e2r_render();
-    e2r_present();
+    _e2r_submit_vert_data();
+    _e2r_submit_ubos();
+    _e2r_acquire_next_image();
+    _e2r_render();
+    _e2r_present();
     ctx.current_vk_frame = (ctx.current_vk_frame + 1) % FRAMES_IN_FLIGHT;
 }
