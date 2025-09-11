@@ -2,13 +2,14 @@
 
 #include <GLFW/glfw3.h>
 
-#include "e2r_camera.h"
-#include "e2r_core.h"
-#include "e2r_draw.h"
 #include "common/lin_math.h"
 #include "common/random.h"
 #include "common/types.h"
 #include "common/util.h"
+#include "e2r_camera.h"
+#include "e2r_core.h"
+#include "e2r_draw.h"
+#include "e2r_ui.h"
 
 list_define_type(TransformList, m4);
 
@@ -181,6 +182,12 @@ int main()
         e2r_draw_string("Hello, world!\n", &pen_x, &pen_y, e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 1.0f, 1.0f));
 
         e2r_draw_string("YESSSS!", &pen_x, &pen_y, e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 0.0f, 1.0f));
+
+        e2r_ui_begin_window(V2(500.0f, 200.0f), V2(200.0f, 400.0f), V4(0.2f, 0.2f, 0.2f, 1.0f));
+        e2r_ui_draw_text("Line 1\n", e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 1.0f, 1.0f));
+        e2r_ui_draw_text("Line 2\n", e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 1.0f, 1.0f));
+        e2r_ui_draw_text("Line 3\n", e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 1.0f, 1.0f));
+        e2r_ui_end_window();
 
         m4 *transform;
         list_iterate(&app_ctx.transform_list, i, transform)

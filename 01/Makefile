@@ -17,7 +17,7 @@ debug: bin/test
 	lldb bin/test -o run
 
 bin/test: $(wildcard src/*) bin/common.o $(SHADERS)
-	clang $(CFLAGS) src/main.c src/e2r_core.c src/e2r_camera.c src/e2r_draw.c bin/common.o -o bin/test $(LFLAGS)
+	clang $(CFLAGS) src/main.c src/e2r_core.c src/e2r_camera.c src/e2r_draw.c src/e2r_ui.c bin/common.o -o bin/test $(LFLAGS)
 
 bin/common.o: $(wildcard src/common/*)
 	clang -c $(CFLAGS) src/common/common.c -o bin/common.o
