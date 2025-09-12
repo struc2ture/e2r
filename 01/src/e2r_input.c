@@ -9,11 +9,12 @@
 
 typedef struct _InputCtx
 {
-    bool current_key_states[GLFW_KEY_LAST];
-    bool previous_key_states[GLFW_KEY_LAST];
-    bool current_mouse_button_states[GLFW_MOUSE_BUTTON_8];
-    bool previous_mouse_button_states[GLFW_MOUSE_BUTTON_8];
+    bool current_key_states[GLFW_KEY_LAST + 1];
+    bool previous_key_states[GLFW_KEY_LAST + 1];
+    bool current_mouse_button_states[GLFW_MOUSE_BUTTON_8 + 1];
+    bool previous_mouse_button_states[GLFW_MOUSE_BUTTON_8 + 1];
 
+    f32 mouse_smooth_factor;
     v2 current_mouse_pos;
     v2 previous_mouse_pos;
     v2 mouse_delta;
@@ -55,31 +56,30 @@ void e2r_update_state(void *window)
 
     _input_ctx->previous_mouse_pos = _input_ctx->current_mouse_pos;
 
-    const f32 smooth_factor = 0.5f;
+    _input_ctx->mouse_smooth_factor = 0.5f; // TODO: set it in init
     _input_ctx->mouse_delta_smooth.x =
-        smooth_factor * _input_ctx->mouse_delta_smooth.x +
-        (1.0f - smooth_factor) * _input_ctx->mouse_delta.x;
+        _input_ctx->mouse_smooth_factor * _input_ctx->mouse_delta_smooth.x +
+        (1.0f - _input_ctx->mouse_smooth_factor) * _input_ctx->mouse_delta.x;
     _input_ctx->mouse_delta_smooth.y =
-        smooth_factor * _input_ctx->mouse_delta_smooth.y +
-        (1.0f - smooth_factor) * _input_ctx->mouse_delta.y;
-
+        _input_ctx->mouse_smooth_factor * _input_ctx->mouse_delta_smooth.y +
+        (1.0f - _input_ctx->mouse_smooth_factor) * _input_ctx->mouse_delta.y;
 }
 
 bool e2r_is_key_down(int key)
 {
-    bassert(key < GLFW_KEY_LAST);
+    bassert(key <= GLFW_KEY_LAST);
     return _input_ctx->current_key_states[key];
 }
 
 bool e2r_is_key_pressed(int key)
 {
-    bassert(key < GLFW_KEY_LAST);
+    bassert(key <= GLFW_KEY_LAST);
     return _input_ctx->current_key_states[key] && !_input_ctx->previous_key_states[key];
 }
 
 bool e2r_is_key_released(int key)
 {
-    bassert(key < GLFW_KEY_LAST);
+    bassert(key <= GLFW_KEY_LAST);
     return !_input_ctx->current_key_states[key] && _input_ctx->previous_key_states[key];
 }
 
@@ -101,16 +101,19 @@ v2 e2r_get_mouse_delta_smooth()
 
 bool e2r_is_mouse_down(int button)
 {
+    bassert(button <= GLFW_MOUSE_BUTTON_8);
     return _input_ctx->current_mouse_button_states[button];
 }
 
 bool e2r_is_mouse_pressed(int button)
 {
+    bassert(button <= GLFW_MOUSE_BUTTON_8);
     return _input_ctx->current_mouse_button_states[button] && !_input_ctx->previous_mouse_button_states[button];
 }
 
 bool e2r_is_mouse_released(int button)
 {
+    bassert(button <= GLFW_MOUSE_BUTTON_8);
     return !_input_ctx->current_mouse_button_states[button] && _input_ctx->previous_mouse_button_states[button];
 }
 
