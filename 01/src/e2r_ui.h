@@ -1,26 +1,33 @@
 #pragma once
 
 #include "common/types.h"
-#include "font_loader.h"
+#include "common/util.h"
+
+list_define_type(E2R_UI_BulletItemList, const char *);
+
+typedef struct E2R_UI_BulletList
+{
+    E2R_UI_BulletItemList bullet_items;
+} E2R_UI_BulletList;
+
+list_define_type(E2R_UI_BulletListList, E2R_UI_BulletList);
 
 typedef struct E2R_UI_Window
 {
-    bool initialized;
-    bool open;
-    bool close_button_pressed;
-    bool is_dragged;
-
-    v2 pos;
     v2 size;
+    v2 pos;
     v4 bg_color;
+
+    E2R_UI_BulletListList bullet_lists;
 
 } E2R_UI_Window;
 
-void e2r_ui_init();
-void e2r_ui_process_input();
-bool e2r_ui_begin_window(E2R_UI_Window *window);
-bool e2r_ui_button_ex(v2 pos, v2 size, const char ch, bool *button_active);
-void e2r_ui_draw_button(v2 pos, v2 size, char ch, bool hovered, bool active);
-v2 e2r_ui_center_glyph_in_box(v2 pos, v2 size, char ch);
-void e2r_ui_draw_text(const char *str);
-void e2r_ui_end_window();
+E2R_UI_Window *e2r_ui__create_window(v2 pos, v2 size, v4 bg_color);
+void e2r_ui__destroy_window(E2R_UI_Window *window);
+
+void e2r_ui__render_bullet_list(f32 *pen_x, f32 *pen_y, E2R_UI_BulletList *bullet_list);
+void e2r_ui__render_window(E2R_UI_Window *window);
+void e2r_ui__render_windows();
+
+E2R_UI_BulletList *e2r_ui__add_bullet_list(E2R_UI_Window *window);
+void e2r_ui__submit_bullet_list_item(E2R_UI_BulletList *bullet_list, const char *item);

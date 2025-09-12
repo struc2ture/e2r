@@ -101,7 +101,6 @@ void check_input_TEMP()
 int main()
 {
     e2r_init(1000, 900, "E2R!!!");
-    e2r_ui_init();
 
     f32 offset = 100.0f;
 
@@ -135,15 +134,19 @@ int main()
 
     app_ctx.light_pos = V3(10.0f, 0.0f, 0.0f);
 
-    E2R_UI_Window window = {};
-    E2R_UI_Window window2 = {};
+    E2R_UI_Window *window1 = e2r_ui__create_window(V2(100.0f, 100.0f), V2(100.0f, 100.0f), V4(0.4f, 0.4f, 0.4f, 1.0f));
+    E2R_UI_BulletList *bullet_list1 = e2r_ui__add_bullet_list(window1);
+    E2R_UI_BulletList *bullet_list2 = e2r_ui__add_bullet_list(window1);
+    E2R_UI_Window *window2 = e2r_ui__create_window(V2(250.0f, 250.0f), V2(100.0f, 100.0f), V4(0.4f, 0.4f, 0.4f, 1.0f));
+
+    bool show_bullet_items = true;
+    f32 show_bullet_items_timer = 0.0f;
 
     while (e2r_is_running())
     {
         e2r_start_frame();
 
         check_input_TEMP();
-        e2r_ui_process_input();
 
         const f32 delta = e2r_get_dt();
 
@@ -188,23 +191,20 @@ int main()
 
         e2r_draw_string("YESSSS!", &pen_x, &pen_y, e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 0.0f, 1.0f));
 
-        if (e2r_ui_begin_window(&window))
+        show_bullet_items_timer += dt;
+        if (show_bullet_items_timer > 1.0f)
         {
-            e2r_ui_draw_text("Line 1\n");
-            e2r_ui_draw_text("Line 2\n");
-            e2r_ui_draw_text("Line 3\n");
-            e2r_ui_end_window();
+            show_bullet_items = !show_bullet_items;
+            show_bullet_items_timer -= 1.0f;
+        }
+
+        if (show_bullet_items)
+        {
+            e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 1");
+            e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 2");
         }
         
-        // window.pos.x += dt * speed;
-
-        if (e2r_ui_begin_window(&window2))
-        {
-            e2r_ui_draw_text("Line a\n");
-            e2r_ui_draw_text("Line b\n");
-            e2r_ui_draw_text("Line c\n");
-            e2r_ui_end_window();
-        }
+        e2r_ui__render_windows();
 
         m4 *transform;
         list_iterate(&app_ctx.transform_list, i, transform)

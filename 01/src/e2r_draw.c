@@ -183,6 +183,22 @@ void e2r_draw_string(const char *str, f32 *pen_x, f32 *pen_y, const FontAtlas *f
     }
 }
 
+void e2r_draw_line(const char *str, f32 *pen_x, f32 *pen_y, const FontAtlas *font_atlas, v4 color)
+{
+    int len = strlen(str);
+    f32 starting_x = *pen_x;
+
+    for (int i = 0; i < len; i++)
+    {
+        if (str[i] != '\n')
+        {
+            e2r_draw_char(str[i], pen_x, pen_y, font_atlas, color);
+        }
+    }
+    *pen_y += font_loader_get_ascender(font_atlas);
+    *pen_x = starting_x;
+}
+
 E2R_UIRenderData e2r_get_ui_render_data()
 {
     _UIQuadList *ui_quad_list = &draw_data.ui_quad_list;

@@ -30,6 +30,20 @@
 
 #define noop() do {} while (0)
 
+#define bassert(EXPR) do { \
+    if (!(EXPR)) { \
+        bp(); \
+        warning("bassert failed: %s", #EXPR); \
+    } \
+} while (0)
+
+#define bassertf(EXPR, FMT, ...) do { \
+    if (!(EXPR)) { \
+        bp(); \
+        warning("bassertf failed: %s | " FMT, #EXPR, ##__VA_ARGS__); \
+    } \
+} while (0)
+
 // DYNAMIC LIST -----------------------
 
 #define list_define_type(NAME, TYPE) \
@@ -78,7 +92,16 @@
     } while (0)
 
 #define list_iterate(LIST, INDEX, IT) \
-    for (size_t INDEX = 0; INDEX < (LIST)->size && ((IT) = &(LIST)->data[INDEX], 1); ++INDEX) 
+    for (size_t INDEX = 0; INDEX < (LIST)->size && ((IT) = &(LIST)->data[INDEX], 1); ++INDEX)
+
+#define list_erase(LIST, INDEX) \
+    do { \
+        if ((INDEX) < (LIST)->size) { \
+            for (size_t ___i = (INDEX); ___i + 1 < (LIST)->size; ++___i) \
+                (LIST)->data[___i] = (LIST)->data[___i + 1]; \
+            (LIST)->size--; \
+        } \
+    } while (0)
 
 static void *xmalloc(size_t size)
 {
