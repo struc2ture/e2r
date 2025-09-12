@@ -23,6 +23,7 @@ void e2r_set_light_data(
     v3 pos,
     f32 shininess);
 v2 e2r_get_mouse_pos();
+bool e2r_get_mouse_down();
 bool e2r_get_mouse_clicked();
 bool e2r_get_mouse_released();
 v2 e2r_get_mouse_delta();

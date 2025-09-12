@@ -36,7 +36,7 @@ typedef struct AppCtx
 
 globvar AppCtx app_ctx;
 
-void check_input()
+void check_input_TEMP()
 {
     f32 delta = e2r_get_dt();
 
@@ -142,7 +142,8 @@ int main()
     {
         e2r_start_frame();
 
-        check_input();
+        check_input_TEMP();
+        e2r_ui_process_input();
 
         const f32 delta = e2r_get_dt();
 
@@ -197,13 +198,13 @@ int main()
         
         // window.pos.x += dt * speed;
 
-        // if (e2r_ui_begin_window(&window2))
-        // {
-        //     e2r_ui_draw_text("Line a\n");
-        //     e2r_ui_draw_text("Line b\n");
-        //     e2r_ui_draw_text("Line c\n");
-        //     e2r_ui_end_window();
-        // }
+        if (e2r_ui_begin_window(&window2))
+        {
+            e2r_ui_draw_text("Line a\n");
+            e2r_ui_draw_text("Line b\n");
+            e2r_ui_draw_text("Line c\n");
+            e2r_ui_end_window();
+        }
 
         m4 *transform;
         list_iterate(&app_ctx.transform_list, i, transform)
