@@ -9,6 +9,7 @@
 #include "e2r_camera.h"
 #include "e2r_core.h"
 #include "e2r_draw.h"
+#include "e2r_input.h"
 #include "e2r_ui.h"
 
 list_define_type(TransformList, m4);
@@ -18,7 +19,6 @@ typedef struct AppCtx
     E2R_Camera camera;
 
     bool mouse_captured;
-    bool mouse_capture_toggle_old_press;
 
     f64 last_mouse_x, last_mouse_y;
     f64 mouse_dx_smoothed, mouse_dy_smoothed;
@@ -40,45 +40,18 @@ void check_input_TEMP()
 {
     f32 delta = e2r_get_dt();
 
-    GLFWwindow *window = e2r_get_glfw_window_TEMP();
-
-    if (glfwGetKey(window, GLFW_KEY_C) == GLFW_PRESS && !app_ctx.mouse_capture_toggle_old_press)
+    if (e2r_is_key_pressed(GLFW_KEY_C))
     {
-        app_ctx.mouse_captured = !app_ctx.mouse_captured;
-        app_ctx.first_mouse = true;
-        glfwSetInputMode(window, GLFW_CURSOR, app_ctx.mouse_captured ? GLFW_CURSOR_DISABLED : GLFW_CURSOR_NORMAL);
-        app_ctx.mouse_capture_toggle_old_press = true;
-    }
-    else if (glfwGetKey(window, GLFW_KEY_C) != GLFW_PRESS)
-    {
-        app_ctx.mouse_capture_toggle_old_press = false;
+        e2r_toggle_mouse_capture();
     }
 
     // Update camera based on mouse
-    if (app_ctx.mouse_captured)
+    if (e2r_is_mouse_captured())
     {
-        f64 mouse_x, mouse_y;
-        glfwGetCursorPos(window, &mouse_x, &mouse_y);
-
-        if (app_ctx.first_mouse)
-        {
-            app_ctx.last_mouse_x = mouse_x;
-            app_ctx.last_mouse_y = mouse_y;
-            app_ctx.first_mouse = false;
-        }
-
-        f64 mouse_dx = mouse_x - app_ctx.last_mouse_x;
-        f64 mouse_dy = mouse_y - app_ctx.last_mouse_y;
-        app_ctx.last_mouse_x = mouse_x;
-        app_ctx.last_mouse_y = mouse_y;
-
-        const f64 factor = 0.3;
-        app_ctx.mouse_dx_smoothed = factor * app_ctx.mouse_dx_smoothed + (1.0 - factor) * mouse_dx;
-        app_ctx.mouse_dy_smoothed = factor * app_ctx.mouse_dy_smoothed + (1.0 - factor) * mouse_dy;
-
         f32 mouse_sens = 0.2f;
-        app_ctx.camera.pitch_deg -= mouse_sens * app_ctx.mouse_dy_smoothed;
-        app_ctx.camera.yaw_deg += mouse_sens * app_ctx.mouse_dx_smoothed;
+        v2 mouse_delta = e2r_get_mouse_delta_smooth();
+        app_ctx.camera.pitch_deg -= mouse_sens * mouse_delta.y;
+        app_ctx.camera.yaw_deg += mouse_sens * mouse_delta.x;
         if (app_ctx.camera.pitch_deg > 89.9f) app_ctx.camera.pitch_deg = 89.9f;
         else if (app_ctx.camera.pitch_deg < -89.9f) app_ctx.camera.pitch_deg = -89.9f;
     }
@@ -89,12 +62,12 @@ void check_input_TEMP()
         v3 dir = e2r_camera_get_dir(&app_ctx.camera);
         v3 right = e2r_camera_get_right(&app_ctx.camera);
         v3 up = e2r_camera_get_up(&app_ctx.camera);
-        if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, speed * delta));
-        if (glfwGetKey(window, GLFW_KEY_S) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, -speed * delta));
-        if (glfwGetKey(window, GLFW_KEY_A) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, speed * delta));
-        if (glfwGetKey(window, GLFW_KEY_D) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, -speed * delta));
-        if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, speed * delta));
-        if (glfwGetKey(window, GLFW_KEY_LEFT_SHIFT) == GLFW_PRESS) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, -speed * delta));
+        if (e2r_is_key_down(GLFW_KEY_W)) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, speed * delta));
+        if (e2r_is_key_down(GLFW_KEY_S)) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(dir, -speed * delta));
+        if (e2r_is_key_down(GLFW_KEY_A)) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, speed * delta));
+        if (e2r_is_key_down(GLFW_KEY_D)) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(right, -speed * delta));
+        if (e2r_is_key_down(GLFW_KEY_SPACE)) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, speed * delta));
+        if (e2r_is_key_down(GLFW_KEY_LEFT_SHIFT)) app_ctx.camera.pos = v3_add(app_ctx.camera.pos, v3_scale(up, -speed * delta));
     }
 }
 
@@ -140,7 +113,6 @@ int main()
     E2R_UI_Window *window2 = e2r_ui__create_window(V2(250.0f, 250.0f), V2(100.0f, 100.0f), V4(0.4f, 0.4f, 0.4f, 1.0f));
 
     bool show_bullet_items = true;
-    f32 show_bullet_items_timer = 0.0f;
 
     while (e2r_is_running())
     {
@@ -191,11 +163,9 @@ int main()
 
         e2r_draw_string("YESSSS!", &pen_x, &pen_y, e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 0.0f, 1.0f));
 
-        show_bullet_items_timer += dt;
-        if (show_bullet_items_timer > 1.0f)
+        if (e2r_is_key_pressed(GLFW_KEY_B))
         {
             show_bullet_items = !show_bullet_items;
-            show_bullet_items_timer -= 1.0f;
         }
 
         if (show_bullet_items)

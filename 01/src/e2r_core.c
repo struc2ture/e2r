@@ -17,6 +17,7 @@
 #include "common/types.h"
 #include "common/util.h"
 #include "e2r_draw.h"
+#include "e2r_input.h"
 #include "vertex.h"
 
 #define FRAMES_IN_FLIGHT 2
@@ -200,11 +201,6 @@ typedef struct E2R_Ctx
     f32 light_specular_strength;
     v3 light_pos;
     f32 light_shininess;
-
-    bool left_mouse_state;
-    bool prev_left_mouse_state;
-    v2 mouse_delta;
-    v2 prev_mouse_pos;
 
 } E2R_Ctx;
 
@@ -2397,11 +2393,7 @@ void e2r_start_frame()
 
     glfwPollEvents();
 
-    ctx.prev_left_mouse_state = ctx.left_mouse_state;
-    ctx.left_mouse_state = glfwGetMouseButton(ctx.glfw_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
-    v2 current_mouse_pos = e2r_get_mouse_pos();
-    ctx.mouse_delta = v2_sub(current_mouse_pos, ctx.prev_mouse_pos);
-    ctx.prev_mouse_pos = current_mouse_pos;
+    e2r_update_state(ctx.glfw_window);
 }
 
 f32 e2r_get_dt()
@@ -2428,33 +2420,6 @@ void e2r_set_light_data(
     ctx.light_specular_strength = specular_strength;
     ctx.light_pos = pos;
     ctx.light_shininess = shininess;
-}
-
-v2 e2r_get_mouse_pos()
-{
-    double x64, y64;
-    glfwGetCursorPos(ctx.glfw_window, &x64, &y64);
-    return V2(x64, y64);
-}
-
-bool e2r_get_mouse_down()
-{
-    return ctx.left_mouse_state;
-}
-
-bool e2r_get_mouse_clicked()
-{
-    return ctx.left_mouse_state && !ctx.prev_left_mouse_state;
-}
-
-bool e2r_get_mouse_released()
-{
-    return !ctx.left_mouse_state && ctx.prev_left_mouse_state;
-}
-
-v2 e2r_get_mouse_delta()
-{
-    return ctx.mouse_delta;
 }
 
 // --------------------------------------------
