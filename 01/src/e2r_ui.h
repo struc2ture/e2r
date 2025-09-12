@@ -7,6 +7,8 @@ typedef struct E2R_UI_Window
 {
     bool initialized;
     bool open;
+    bool close_button_pressed;
+    bool is_dragged;
 
     v2 pos;
     v2 size;

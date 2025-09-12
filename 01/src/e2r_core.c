@@ -201,6 +201,11 @@ typedef struct E2R_Ctx
     v3 light_pos;
     f32 light_shininess;
 
+    bool left_mouse_state;
+    bool prev_left_mouse_state;
+    v2 mouse_delta;
+    v2 prev_mouse_pos;
+
 } E2R_Ctx;
 
 globvar E2R_Ctx ctx;
@@ -2391,6 +2396,12 @@ void e2r_start_frame()
     vkResetFences(ctx.vk_device, 1, &frame->in_flight_fence);
 
     glfwPollEvents();
+
+    ctx.prev_left_mouse_state = ctx.left_mouse_state;
+    ctx.left_mouse_state = glfwGetMouseButton(ctx.glfw_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    v2 current_mouse_pos = e2r_get_mouse_pos();
+    ctx.mouse_delta = v2_sub(current_mouse_pos, ctx.prev_mouse_pos);
+    ctx.prev_mouse_pos = current_mouse_pos;
 }
 
 f32 e2r_get_dt()
@@ -2428,7 +2439,17 @@ v2 e2r_get_mouse_pos()
 
 bool e2r_get_mouse_clicked()
 {
-    return glfwGetMouseButton(ctx.glfw_window, GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS;
+    return ctx.left_mouse_state && !ctx.prev_left_mouse_state;
+}
+
+bool e2r_get_mouse_released()
+{
+    return !ctx.left_mouse_state && ctx.prev_left_mouse_state;
+}
+
+v2 e2r_get_mouse_delta()
+{
+    return ctx.mouse_delta;
 }
 
 // --------------------------------------------

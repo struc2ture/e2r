@@ -195,7 +195,7 @@ int main()
             e2r_ui_end_window();
         }
         
-        window.pos.x += dt * speed;
+        // window.pos.x += dt * speed;
 
         // if (e2r_ui_begin_window(&window2))
         // {

@@ -30,6 +30,16 @@ static inline v2 v2_add(v2 a, v2 b)
     return result;
 }
 
+static inline v2 v2_sub(v2 a, v2 b)
+{
+    v2 result =
+    {
+        .x = a.x - b.x,
+        .y = a.y - b.y
+    };
+    return result;
+}
+
 // ----------------------------------------
 
 v3 v3_normalize(v3 v);

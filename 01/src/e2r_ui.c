@@ -1,6 +1,7 @@
 #include "e2r_ui.h"
 
 #include "common/types.h"
+#include "common/lin_math.h"
 #include "common/util.h"
 #include "e2r_core.h"
 #include "e2r_draw.h"
@@ -46,6 +47,7 @@ bool e2r_ui_begin_window(E2R_UI_Window *window)
         window->bg_color = _ui_ctx.default_window_bg;
         window->open = true;
         window->initialized = true;
+        window->close_button_pressed = false;
 
         _ui_ctx.next_window_pos = V2(window->pos.x + _ui_ctx.window_offset, window->pos.y);
     }
@@ -70,10 +72,37 @@ bool e2r_ui_begin_window(E2R_UI_Window *window)
             mouse_pos.y >= button_pos.y && mouse_pos.y <= (button_pos.y + button_size.y))
         {
             button_color = _ui_ctx.hovered_button_bg;
+
             if (e2r_get_mouse_clicked())
+            {
+                window->close_button_pressed = true;
+            }
+
+            if (window->close_button_pressed && e2r_get_mouse_released())
             {
                 window->open = false;
             }
+        }
+        else
+        {
+            window->close_button_pressed = false;
+            if (mouse_pos.x >= window->pos.x && mouse_pos.x <= (window->pos.x + window->size.x) &&
+                mouse_pos.y >= window->pos.y && mouse_pos.y <= (window->pos.y + window->size.y))
+            {
+                if (e2r_get_mouse_clicked())
+                {
+                    window->is_dragged = true;
+                }
+            }
+            if (e2r_get_mouse_released())
+            {
+                window->is_dragged = false;
+            }
+        }
+
+        if (window->is_dragged)
+        {
+            window->pos = v2_add(window->pos, e2r_get_mouse_delta());
         }
 
         e2r_draw_quad(button_pos, button_size, button_color);
