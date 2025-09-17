@@ -16,7 +16,7 @@ SHADERS += bin/shaders/text.vert.spv bin/shaders/text.frag.spv
 
 # export VK_ICD_FILENAMES = /usr/local/share/vulkan/icd.d/MoltenVK_icd.json
 export VK_LAYER_PATH = $(VULKAN_SDK)/share/vulkan/explicit_layer.d
-export LD_LIBRARY_PATH = /home/struc/dev/jects/font-loader/out:$(VULKAN_SDK)/lib:$$DYLD_LIBRARY_PATH
+export LD_LIBRARY_PATH = /home/struc/dev/jects/font-loader/out:$(VULKAN_SDK)/lib:$$LD_LIBRARY_PATH
 # export LD_DEBUG = libs ./bin/test
 
 default: gdb
@@ -29,6 +29,8 @@ gdb: bin/test
 
 debug: bin/test 
 	lldb bin/test
+
+build: bin/test
 
 bin/test: $(wildcard src/*) bin/common.o $(SHADERS)
 	clang $(CFLAGS) src/main.c src/e2r_core.c src/e2r_camera.c src/e2r_draw.c src/e2r_ui.c src/e2r_input.c bin/common.o -o bin/test $(LFLAGS)

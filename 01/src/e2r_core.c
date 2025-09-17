@@ -233,8 +233,10 @@ VkInstance _vk_create_instance()
     const char **glfw_ext = glfwGetRequiredInstanceExtensions(&glfw_ext_count);
     const char *other_exts[] =
     {
+        #ifndef LINUX
         VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+        #endif
     };
 
     u32 ext_count = 0;
@@ -257,11 +259,13 @@ VkInstance _vk_create_instance()
     create_info.ppEnabledExtensionNames = extensions;
     create_info.enabledLayerCount = array_count(validation_layers);
     create_info.ppEnabledLayerNames = validation_layers;
+    #ifndef LINUX
     create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    #endif
 
     VkInstance instance;
     VkResult result = vkCreateInstance(&create_info, NULL, &instance);
-    if (result != VK_SUCCESS) fatal("Failed to create instance");
+    if (result != VK_SUCCESS) fatal("Failed to create instance. Result: %d", result);
 
     free(extensions);
 
