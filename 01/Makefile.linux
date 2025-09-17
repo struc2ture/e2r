@@ -1,0 +1,61 @@
+VULKAN_SDK = /home/struc/dev/other/vulkansdk/1.4.321.1/x86_64
+
+
+CFLAGS = -g -DLINUX
+CFLAGS += -I/usr/include -I/home/struc/dev/shared/stb -I/home/struc/dev/jects/font-loader/out
+LFLAGS = -L$(VULKAN_SDK)/lib -lvulkan -Wl,-rpath,/home/struc/dev/other/vulkansdk/1.4.321.1/x86_64/lib -lglfw -lm -ldl
+LFLAGS += -L/home/struc/dev/jects/font-loader/out -lfont_loader
+
+GLSLC = /home/struc/dev/other/vulkansdk/1.4.321.1/x86_64/bin/glslc
+
+SHADERS = bin/shaders/tri.vert.spv bin/shaders/tri.frag.spv
+SHADERS += bin/shaders/cubes.vert.spv bin/shaders/cubes.frag.spv
+SHADERS += bin/shaders/ui.vert.spv bin/shaders/ui.frag.spv
+SHADERS += bin/shaders/text.vert.spv bin/shaders/text.frag.spv
+
+
+# export VK_ICD_FILENAMES = /usr/local/share/vulkan/icd.d/MoltenVK_icd.json
+export VK_LAYER_PATH = $(VULKAN_SDK)/share/vulkan/explicit_layer.d
+export LD_LIBRARY_PATH = /home/struc/dev/jects/font-loader/out:$(VULKAN_SDK)/lib:$$DYLD_LIBRARY_PATH
+# export LD_DEBUG = libs ./bin/test
+
+default: gdb
+
+run: bin/test
+	bin/test
+
+gdb: bin/test
+	gdb bin/test
+
+debug: bin/test 
+	lldb bin/test
+
+bin/test: $(wildcard src/*) bin/common.o $(SHADERS)
+	clang $(CFLAGS) src/main.c src/e2r_core.c src/e2r_camera.c src/e2r_draw.c src/e2r_ui.c src/e2r_input.c bin/common.o -o bin/test $(LFLAGS)
+
+bin/common.o: $(wildcard src/common/*)
+	clang -c $(CFLAGS) src/common/common.c -o bin/common.o
+
+bin/shaders/tri.vert.spv: src/shaders/tri.vert
+	$(GLSLC) $< -o $@
+
+bin/shaders/tri.frag.spv: src/shaders/tri.frag
+	$(GLSLC) $< -o $@
+
+bin/shaders/ui.vert.spv: src/shaders/ui.vert
+	$(GLSLC) $< -o $@
+
+bin/shaders/ui.frag.spv: src/shaders/ui.frag
+	$(GLSLC) $< -o $@
+
+bin/shaders/text.vert.spv: src/shaders/text.vert
+	$(GLSLC) $< -o $@
+
+bin/shaders/text.frag.spv: src/shaders/text.frag
+	$(GLSLC) $< -o $@
+
+bin/shaders/cubes.vert.spv: src/shaders/cubes.vert
+	$(GLSLC) $< -o $@
+
+bin/shaders/cubes.frag.spv: src/shaders/cubes.frag
+	$(GLSLC) $< -o $@
