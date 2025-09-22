@@ -1,5 +1,6 @@
 #include <stdio.h>
 
+#include <vulkan/vulkan.h>
 #include <GLFW/glfw3.h>
 
 #include "common/lin_math.h"

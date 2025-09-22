@@ -235,8 +235,10 @@ VkInstance _vk_create_instance()
     const char **glfw_ext = glfwGetRequiredInstanceExtensions(&glfw_ext_count);
     const char *other_exts[] =
     {
+        #ifndef LINUX
         VK_KHR_PORTABILITY_ENUMERATION_EXTENSION_NAME,
         VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME
+        #endif
     };
 
     u32 ext_count = 0;
@@ -259,11 +261,13 @@ VkInstance _vk_create_instance()
     create_info.ppEnabledExtensionNames = extensions;
     create_info.enabledLayerCount = array_count(validation_layers);
     create_info.ppEnabledLayerNames = validation_layers;
+    #ifndef LINUX
     create_info.flags = VK_INSTANCE_CREATE_ENUMERATE_PORTABILITY_BIT_KHR;
+    #endif
 
     VkInstance instance;
     VkResult result = vkCreateInstance(&create_info, NULL, &instance);
-    if (result != VK_SUCCESS) fatal("Failed to create instance");
+    if (result != VK_SUCCESS) fatal("Failed to create instance. Result: %d", result);
 
     free(extensions);
 
@@ -298,7 +302,7 @@ VkPhysicalDevice _vk_find_physical_device()
 
 u32 _vk_get_queue_family_index()
 {
-    u32 vk_queue_family_index = 0;
+    u32 vk_queue_family_index = UINT32_MAX;
     u32 count;
     vkGetPhysicalDeviceQueueFamilyProperties(ctx.vk_physical_device, &count, NULL);
 
@@ -317,7 +321,7 @@ u32 _vk_get_queue_family_index()
 
     free(queue_families);
 
-    assert(vk_queue_family_index > 0);
+    assert(vk_queue_family_index < UINT32_MAX);
 
     return vk_queue_family_index;
 }
@@ -332,7 +336,12 @@ VkDevice _vk_create_device()
     queue_create_info.pQueuePriorities = &priority;
 
     // VK_KHR_portability_subset must be enabled because physical device VkPhysicalDevice 0x600001667be0 supports it.
-    const char *device_extensions[] = {"VK_KHR_portability_subset", "VK_KHR_swapchain"};
+    const char *device_extensions[] = {
+        #ifndef LINUX
+        "VK_KHR_portability_subset", 
+        #endif
+        "VK_KHR_swapchain"
+    };
     VkDeviceCreateInfo device_create_info = {};
     device_create_info.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     device_create_info.queueCreateInfoCount = 1;
