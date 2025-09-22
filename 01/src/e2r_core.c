@@ -1057,8 +1057,9 @@ Vk_TextureBundle _vk_load_texture(const char *path)
 
 Vk_TextureBundle _vk_load_texture_from_font_atlas(const FontAtlas *atlas)
 {
-    VkDeviceSize image_size = atlas->width * atlas->height; // 1 bytes per pixel
-    VkFormat format = VK_FORMAT_R8_UNORM;
+    VkDeviceSize image_size = atlas->width * atlas->height * atlas->channels;
+    bassert(atlas->channels == 4);
+    VkFormat format = VK_FORMAT_R8G8B8A8_UNORM;
     Vk_TextureBundle texture_bundle = _vk_load_texture_from_pixels(atlas->pixels, atlas->width, atlas->height, image_size, format);
     return texture_bundle;
 }
@@ -1307,7 +1308,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
         VkDescriptorSetLayoutBinding descriptor_set_layout_binding_1 = {};
         descriptor_set_layout_binding_1.binding = 1;
         descriptor_set_layout_binding_1.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptor_set_layout_binding_1.descriptorCount = 1;
+        descriptor_set_layout_binding_1.descriptorCount = 2;
         descriptor_set_layout_binding_1.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
 
         VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] =
@@ -1354,7 +1355,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
         descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         descriptor_pool_sizes[0].descriptorCount = frame_count * ubo_count;
         descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptor_pool_sizes[1].descriptorCount = 1;
+        descriptor_pool_sizes[1].descriptorCount = 2;
 
         VkDescriptorPoolCreateInfo create_info = {};
         create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
@@ -1403,10 +1404,13 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
 
         // Update descriptor set: texture sampler
         {
-            VkDescriptorImageInfo descriptor_image_info = {};
-            descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            descriptor_image_info.imageView = ctx.ui_atlas_texture.image_view;
-            descriptor_image_info.sampler = ctx.ui_atlas_texture.sampler;
+            VkDescriptorImageInfo descriptor_image_infos[2] = {};
+            descriptor_image_infos[0].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            descriptor_image_infos[0].imageView = ctx.ui_atlas_texture.image_view;
+            descriptor_image_infos[0].sampler = ctx.ui_atlas_texture.sampler;
+            descriptor_image_infos[1].imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+            descriptor_image_infos[1].imageView = ctx.font_atlas_texture.image_view;
+            descriptor_image_infos[1].sampler = ctx.font_atlas_texture.sampler;
 
             VkWriteDescriptorSet write_descriptor_set = {};
             write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1414,8 +1418,8 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
             write_descriptor_set.dstBinding = 1;
             write_descriptor_set.dstArrayElement = 0;
             write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            write_descriptor_set.descriptorCount = 1;
-            write_descriptor_set.pImageInfo = &descriptor_image_info;
+            write_descriptor_set.descriptorCount = array_count(descriptor_image_infos);
+            write_descriptor_set.pImageInfo = descriptor_image_infos;
 
             vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
         }
@@ -1445,7 +1449,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
         vertex_input_binding_description.stride = sizeof(VertexUI);
         vertex_input_binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
 
-        int vert_attrib_count = 3;
+        int vert_attrib_count = 4;
         VkVertexInputAttributeDescription *vertex_input_attribute_descriptions = xmalloc(vert_attrib_count * sizeof(vertex_input_attribute_descriptions[0]));
         vertex_input_attribute_descriptions[0] = (VkVertexInputAttributeDescription){
             .location = 0,
@@ -1464,6 +1468,12 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
             .binding = 0,
             .format = VK_FORMAT_R32G32B32A32_SFLOAT,
             .offset = offsetof(VertexUI, color)
+        };
+        vertex_input_attribute_descriptions[3] = (VkVertexInputAttributeDescription){
+            .location = 3,
+            .binding = 0,
+            .format = VK_FORMAT_R32_UINT,
+            .offset = offsetof(VertexUI, tex_index)
         };
 
         VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
@@ -2339,7 +2349,25 @@ void e2r_init(int width, int height, const char *name)
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
     ctx.ui_atlas_texture = _vk_load_texture("res/ui_atlas.png");
 
-    ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 18.0f, 2.0f);
+    ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 18.0f, 2.0f, 4);
+
+    // u8 *px_byte = ctx.font_atlas.pixels;
+    // int x, y;
+    // bool any_nonzero = false;
+    // for (y = 0; y < ctx.font_atlas.height; y++)
+    // {
+    //     for (x = 0; x < ctx.font_atlas.width; x++)
+    //     {
+    //         if (*px_byte > 0)
+    //         {
+    //             any_nonzero = true;
+    //             break;
+    //         }
+    //         px_byte += ctx.font_atlas.channels;
+    //     }
+    //     if (any_nonzero) break;
+    // }
+    // bp();
     ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&ctx.font_atlas);
 
     _vk_create_swapchain_dependent();
@@ -2454,15 +2482,15 @@ void _e2r_submit_vert_data()
     }
 
     // Text pipeline data
-    {
-        E2R_UIRenderData render_data = e2r_get_text_render_data();
-        ctx.text_index_count = render_data.index_list->size;
+    // {
+    //     E2R_UIRenderData render_data = e2r_get_text_render_data();
+    //     ctx.text_index_count = render_data.index_list->size;
 
-        memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
-        memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, render_data.index_list->data, render_data.index_list->size * sizeof(*render_data.index_list->data));
+    //     memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
+    //     memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, render_data.index_list->data, render_data.index_list->size * sizeof(*render_data.index_list->data));
 
-        e2r_reset_text_data();
-    }
+    //     e2r_reset_text_data();
+    // }
 
     // Cubes pipeline data
     {

@@ -15,6 +15,7 @@ typedef struct VertexUI
     v3 pos;
     v2 uv;
     v4 color;
+    u32 tex_index;
 
 } VertexUI;
 

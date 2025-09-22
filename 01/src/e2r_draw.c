@@ -12,10 +12,12 @@
 
 typedef struct _UIQuad
 {
-    v2 pos;
-    v2 size;
+    v2 pos_min;
+    v2 pos_max;
+    v2 uv_min;
+    v2 uv_max;
     v4 color;
-    v2i atlas_coord;
+    u32 tex_index;
 
 } _UIQuad;
 
@@ -117,12 +119,17 @@ void e2r_draw_quad(v2 pos, v2 size, v4 color)
 {
     _UIQuadList *list = &draw_data.ui_quad_list;
 
+    v2 atlas_q_verts[4] = {};
+    _ui_get_atlas_q_verts(V2I(0, 0), atlas_q_verts);
+
     _UIQuad q =
     {
-        .pos = pos,
-        .size = size,
+        .pos_min = pos,
+        .pos_max = v2_add(pos, size),
+        .uv_min = atlas_q_verts[0],
+        .uv_max = atlas_q_verts[2],
         .color = color,
-        .atlas_coord = V2I(0, 0)
+        .tex_index = 0
     };
 
     list_append(list, q);
@@ -132,12 +139,17 @@ void e2r_draw_circle(v2 pos, v2 size, v4 color)
 {
     _UIQuadList *list = &draw_data.ui_quad_list;
 
+    v2 atlas_q_verts[4] = {};
+    _ui_get_atlas_q_verts(V2I(2, 0), atlas_q_verts);
+
     _UIQuad q =
     {
-        .pos = pos,
-        .size = size,
+        .pos_min = pos,
+        .pos_max = v2_add(pos, size),
+        .uv_min = atlas_q_verts[0],
+        .uv_max = atlas_q_verts[2],
         .color = color,
-        .atlas_coord = V2I(2, 0)
+        .tex_index = 0
     };
 
     list_append(list, q);
@@ -145,23 +157,26 @@ void e2r_draw_circle(v2 pos, v2 size, v4 color)
 
 void e2r_draw_char(char ch, f32 *pen_x, f32 * pen_y, const FontAtlas *font_atlas, v4 color)
 {
+    _UIQuadList *list = &draw_data.ui_quad_list;
+
     f32 x = *pen_x;
     f32 y = *pen_y + font_loader_get_ascender(font_atlas);
 
     GlyphQuad q = font_loader_get_glyph_quad(font_atlas, ch, x, y);
 
-    _TextQuad text_quad =
+    _UIQuad text_quad =
     {
         .pos_min = V2(q.screen_min_x, q.screen_max_y),
         .pos_max = V2(q.screen_max_x, q.screen_min_y),
         .uv_min = V2(q.tex_min_x, q.tex_max_y),
         .uv_max = V2(q.tex_max_x, q.tex_min_y),
-        .color = color
+        .color = color,
+        .tex_index = 1
     };
 
     *pen_x += font_loader_get_advance_x(font_atlas, ch);
 
-    list_append(&draw_data.text_quad_list, text_quad);
+    list_append(list, text_quad);
 }
 
 void e2r_draw_string(const char *str, f32 *pen_x, f32 *pen_y, const FontAtlas *font_atlas, v4 color)
@@ -208,19 +223,24 @@ E2R_UIRenderData e2r_get_ui_render_data()
     const _UIQuad *quad;
     list_iterate(ui_quad_list, quad_i ,quad)
     {
-        v2 min = quad->pos;
-        v2 max = v2_add(quad->pos, quad->size);
+        v2 min = quad->pos_min;
+        v2 max = quad->pos_max;
 
         v3 pos[] =
         {
-            V3(min.x, min.y, 0.0f),
-            V3(max.x, min.y, 0.0f),
-            V3(max.x, max.y, 0.0f),
-            V3(min.x, max.y, 0.0f)
+            V3(quad->pos_min.x, quad->pos_min.y, 0.0f),
+            V3(quad->pos_max.x, quad->pos_min.y, 0.0f),
+            V3(quad->pos_max.x, quad->pos_max.y, 0.0f),
+            V3(quad->pos_min.x, quad->pos_max.y, 0.0f)
         };
 
-        v2 atlas_q_verts[4] = {};
-        _ui_get_atlas_q_verts(quad->atlas_coord, atlas_q_verts);
+        v2 uv[] =
+        {
+            V2(quad->uv_min.x, quad->uv_min.y),
+            V2(quad->uv_max.x, quad->uv_min.y),
+            V2(quad->uv_max.x, quad->uv_max.y),
+            V2(quad->uv_min.x, quad->uv_max.y)
+        };
 
         u32 base_index = vert_list->size;
 
@@ -229,8 +249,9 @@ E2R_UIRenderData e2r_get_ui_render_data()
             VertexUI v =
             {
                 .pos = pos[i],
-                .uv = atlas_q_verts[i],
-                .color = quad->color
+                .uv = uv[i],
+                .color = quad->color,
+                .tex_index = quad->tex_index
             };
             list_append(vert_list, v);
         }
