@@ -202,6 +202,8 @@ typedef struct E2R_Ctx
     v3 light_pos;
     f32 light_shininess;
 
+    u64 current_app_frame;
+
 } E2R_Ctx;
 
 globvar E2R_Ctx ctx;
@@ -2420,6 +2422,11 @@ void e2r_set_light_data(
     ctx.light_specular_strength = specular_strength;
     ctx.light_pos = pos;
     ctx.light_shininess = shininess;
+}
+
+u64 e2r_get_current_frame()
+{
+    return ctx.current_app_frame;
 }
 
 // --------------------------------------------

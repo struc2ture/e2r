@@ -18,12 +18,6 @@ typedef struct AppCtx
 {
     E2R_Camera camera;
 
-    bool mouse_captured;
-
-    f64 last_mouse_x, last_mouse_y;
-    f64 mouse_dx_smoothed, mouse_dy_smoothed;
-    bool first_mouse;
-
     TransformList transform_list;
 
     int current_light_color;
@@ -36,7 +30,7 @@ typedef struct AppCtx
 
 globvar AppCtx app_ctx;
 
-void check_input_TEMP()
+void process_3d_scene_inputs()
 {
     f32 delta = e2r_get_dt();
 
@@ -91,7 +85,6 @@ int main()
     }
 
     app_ctx.camera = e2r_camera_set_from_pos_target(V3(0.0f, 0.0f, 5.0f), V3(0.0f, 0.0f, 0.0f));
-    app_ctx.first_mouse = true;
 
     v3 light_colors[] =
     {
@@ -118,7 +111,7 @@ int main()
     {
         e2r_start_frame();
 
-        check_input_TEMP();
+        process_3d_scene_inputs();
 
         const f32 delta = e2r_get_dt();
 
