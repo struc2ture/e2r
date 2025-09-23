@@ -108,12 +108,13 @@ int main()
     E2R_UI_BulletList *bullet_list1 = e2r_ui__add_bullet_list(window1);
     E2R_UI_BulletList *bullet_list2 = e2r_ui__add_bullet_list(window1);
     // E2R_UI_BulletList *bullet_list3 = e2r_ui__add_bullet_list(window2);
-
+    E2R_UI_Button *button = e2r_ui__add_button(window1, V2(310.0f, 350.0f), V2(50.0f, 50.0f));
     bool show_bullet_items = true;
 
     while (e2r_is_running())
     {
         e2r_start_frame();
+        e2r_ui__begin_frame();
 
         process_3d_scene_inputs();
 
@@ -170,8 +171,13 @@ int main()
             e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 1");
             e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 2");
         }
+
+        if (e2r_ui__is_button_pressed(button))
+        {
+            trace("button pressed");
+        }
         
-        e2r_ui__render_windows();
+        e2r_ui__end_frame();
 
         m4 *transform;
         list_iterate(&app_ctx.transform_list, i, transform)

@@ -7,6 +7,7 @@
 #include "common/util.h"
 #include "e2r_core.h"
 #include "e2r_draw.h"
+#include "e2r_input.h"
 
 list_define_type(E2R_UI_WindowList, E2R_UI_Window *);
 
@@ -52,6 +53,130 @@ void _draw_hline(f32 x_min, f32 x_max, f32 y, f32 width, v4 color)
     e2r_draw_quad(min, size, color);
 }
 
+void _update_implicit_interactions()
+{
+    E2R_UI_Window **window_it;
+    list_iterate(&_ui_ctx->window_list, window_i, window_it)
+    {
+        E2R_UI_Window *window = *window_it;
+        const v2 window_min = window->pos;
+        const v2 window_max = v2_add(window->pos, window->size);
+        v2 mouse_pos = e2r_get_mouse_pos();
+
+        if (mouse_pos.x > window_min.x && mouse_pos.x < window_max.x &&
+            mouse_pos.y > window_min.y && mouse_pos.y < window_max.y)
+        {
+            if (e2r_is_mouse_pressed(GLFW_MOUSE_BUTTON_LEFT))
+            {
+                window->is_dragged = true;
+            }
+        }
+
+        if (e2r_is_mouse_released(GLFW_MOUSE_BUTTON_LEFT))
+        {
+            window->is_dragged = false;
+        }
+
+        if (window->is_dragged)
+        {
+            v2 mouse_delta =e2r_get_mouse_delta();
+            window->pos.x += mouse_delta.x;
+            window->pos.y += mouse_delta.y;
+            // trace("window->pos = %f, %f", window->pos.x, window->pos.y);
+        }
+    }
+}
+
+void _render_bullet_list(f32 *pen_x, f32 *pen_y, E2R_UI_BulletList *bullet_list)
+{
+    const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
+    if (bullet_list->bullet_items.size > 0)
+    {
+        const char **bullet_item;
+        list_iterate(&bullet_list->bullet_items, bullet_item_i, bullet_item)
+        {
+            e2r_draw_line(*bullet_item, pen_x, pen_y, font_atlas, _ui_styling->text_color);
+        }
+    }
+    else
+    {
+        e2r_draw_line("Bullet List", pen_x, pen_y, font_atlas, _ui_styling->text_color);
+    }
+    list_clear(&bullet_list->bullet_items);
+}
+
+void _render_button(E2R_UI_Button *button)
+{
+    // const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
+    e2r_draw_quad(button->pos, button->size, V4(1.0f, 1.0f, 1.0f, 1.0f));
+}
+
+void _render_window(E2R_UI_Window *window)
+{
+    const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
+    e2r_draw_quad(window->pos, window->size, _ui_styling->window_bg_color);
+    const v2 window_min = window->pos;
+    const v2 window_max = v2_add(window->pos, window->size);
+    const f32 window_w = window->size.x;
+    const f32 window_h = window->size.y;
+
+    const f32 pad = _ui_styling->window_padding;
+    const f32 item_offset = 2 * pad;
+    const f32 ascender = font_loader_get_ascender(font_atlas);
+
+    StringRect title_rect = font_loader_get_string_rect(font_atlas, window->title);
+    f32 title_w = title_rect.max_x - title_rect.min_x;
+    f32 title_h = title_rect.max_y - title_rect.min_y;
+
+    const f32 header_h = pad + title_rect.max_y + pad;
+    e2r_draw_quad(window_min, V2(window_w, header_h), _ui_styling->window_header_color);
+
+    const f32 border_width = _ui_styling->window_border_width;
+    const v4 border_color = _ui_styling->window_border_color;
+    const f32 separator_y = window_min.y + header_h;
+    const v4 separator_color = _ui_styling->window_separator_color;
+    _draw_hline(window_min.x, window_max.x, separator_y, border_width, separator_color);
+
+    _draw_vline(window_min.x, window_min.y, window_max.y, border_width, border_color);
+    _draw_vline(window_max.x, window_min.y, window_max.y, border_width, border_color);
+    _draw_hline(window_min.x, window_max.x, window_min.y, border_width, border_color);
+    _draw_hline(window_min.x, window_max.x, window_max.y, border_width, border_color);
+
+    f32 title_x = window_min.x + pad + window_w * 0.5f - title_w * 0.5f;
+    f32 title_y = window_min.y - title_rect.min_y + header_h * 0.5f - title_h * 0.5f;
+
+    e2r_draw_line(window->title, &title_x, &title_y, font_atlas, _ui_styling->text_color);
+
+    E2R_UI_BulletList *bullet_list;
+    f32 pen_x = window_min.x + pad;
+    f32 pen_y = separator_y + pad;
+    list_iterate(&window->bullet_lists, bullet_list_i, bullet_list)
+    {
+        _render_bullet_list(&pen_x, &pen_y, bullet_list);
+        pen_y += item_offset;
+    }
+
+    E2R_UI_Button *button;
+    list_iterate(&window->buttons, button_i, button)
+    {
+        _render_button(button);
+    }
+}
+
+void _render_windows()
+{
+    E2R_UI_Window **window_it;
+    list_iterate(&_ui_ctx->window_list, window_i, window_it)
+    {
+        _render_window(*window_it);
+    }
+}
+
+void _render()
+{
+    _render_windows();
+}
+
 // =====================================
 
 void e2r_ui__init()
@@ -63,6 +188,16 @@ void e2r_ui__init()
     _ui_styling->window_padding = 2.0f;
     _ui_styling->window_border_width = 2.0f;
     _ui_styling->text_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+}
+
+void e2r_ui__begin_frame()
+{
+    _update_implicit_interactions();
+}
+
+void e2r_ui__end_frame()
+{
+    _render();
 }
 
 E2R_UI_Window *e2r_ui__create_window(v2 pos, v2 size, const char *title)
@@ -97,80 +232,6 @@ void e2r_ui__destroy_window(E2R_UI_Window *window)
     list_erase(&_ui_ctx->window_list, delete_index);
 }
 
-void e2r_ui__render_bullet_list(f32 *pen_x, f32 *pen_y, E2R_UI_BulletList *bullet_list)
-{
-    const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
-    if (bullet_list->bullet_items.size > 0)
-    {
-        const char **bullet_item;
-        list_iterate(&bullet_list->bullet_items, bullet_item_i, bullet_item)
-        {
-            e2r_draw_line(*bullet_item, pen_x, pen_y, font_atlas, _ui_styling->text_color);
-        }
-    }
-    else
-    {
-        e2r_draw_line("Bullet List", pen_x, pen_y, font_atlas, _ui_styling->text_color);
-    }
-    list_clear(&bullet_list->bullet_items);
-}
-
-void e2r_ui__render_window(E2R_UI_Window *window)
-{
-    const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
-    e2r_draw_quad(window->pos, window->size, _ui_styling->window_bg_color);
-    const v2 window_min = window->pos;
-    const v2 window_max = v2_add(window->pos, window->size);
-    const f32 window_w = window->size.x;
-    const f32 window_h = window->size.y;
-
-    const f32 pad = _ui_styling->window_padding;
-    const f32 item_offset = 2 * pad;
-    const f32 ascender = font_loader_get_ascender(font_atlas);
-
-    StringRect title_rect = font_loader_get_string_rect(font_atlas, window->title);
-    f32 title_w = title_rect.max_x - title_rect.min_x;
-    f32 title_h = title_rect.max_y - title_rect.min_y;
-
-    const f32 header_h = pad + title_rect.max_y + pad;
-    e2r_draw_quad(window->pos, V2(window_w, header_h), _ui_styling->window_header_color);
-
-    const f32 border_width = _ui_styling->window_border_width;
-    const v4 border_color = _ui_styling->window_border_color;
-    const f32 separator_y = window_min.y + header_h;
-    const v4 separator_color = _ui_styling->window_separator_color;
-    _draw_hline(window_min.x, window_max.x, separator_y, border_width, separator_color);
-
-    _draw_vline(window_min.x, window_min.y, window_max.y, border_width, border_color);
-    _draw_vline(window_max.x, window_min.y, window_max.y, border_width, border_color);
-    _draw_hline(window_min.x, window_max.x, window_min.y, border_width, border_color);
-    _draw_hline(window_min.x, window_max.x, window_max.y, border_width, border_color);
-
-
-    f32 title_x = window_min.x + pad + window_w * 0.5f - title_w * 0.5f;
-    f32 title_y = window_min.y - title_rect.min_y + header_h * 0.5f - title_h * 0.5f;
-
-    e2r_draw_line(window->title, &title_x, &title_y, font_atlas, _ui_styling->text_color);
-
-    E2R_UI_BulletList *bullet_list;
-    f32 pen_x = window_min.x + pad;
-    f32 pen_y = separator_y + pad;
-    list_iterate(&window->bullet_lists, bullet_list_i, bullet_list)
-    {
-        e2r_ui__render_bullet_list(&pen_x, &pen_y, bullet_list);
-        pen_y += item_offset;
-    }
-}
-
-void e2r_ui__render_windows()
-{
-    E2R_UI_Window **window_it;
-    list_iterate(&_ui_ctx->window_list, window_i, window_it)
-    {
-        e2r_ui__render_window(*window_it);
-    }
-}
-
 E2R_UI_BulletList *e2r_ui__add_bullet_list(E2R_UI_Window *window)
 {
     E2R_UI_BulletList bullet_list = {};
@@ -185,3 +246,33 @@ void e2r_ui__submit_bullet_list_item(E2R_UI_BulletList *bullet_list, const char 
     list_append(&bullet_list->bullet_items, item);
 }
 
+E2R_UI_Button *e2r_ui__add_button(E2R_UI_Window *window, v2 pos, v2 size)
+{
+    E2R_UI_Button button = {
+        .pos = pos,
+        .size = size
+    };
+    list_append(&window->buttons, button);
+    return &window->buttons.data[window->buttons.size - 1];
+}
+
+void e2r_ui__set_button_text(E2R_UI_Button *button, const char *text)
+{
+    // TODO: This will not work if the underlying str pointer changes
+    // Will work for code segment strings for now
+    button->text = text;
+}
+
+bool e2r_ui__is_button_pressed(E2R_UI_Button *button)
+{
+    v2 mouse_pos = e2r_get_mouse_pos();
+    const v2 window_min = button->pos;
+    const v2 window_max = v2_add(button->pos, button->size);
+
+    if (mouse_pos.x > window_min.x && mouse_pos.x < window_max.x &&
+        mouse_pos.y > window_min.y && mouse_pos.y < window_max.y)
+    {
+        return e2r_is_mouse_down(GLFW_MOUSE_BUTTON_LEFT);
+    }
+    return false;
+}
