@@ -31,20 +31,17 @@ typedef struct E2R_3DDrawCall
 
 list_define_type(E2R_3DDrawCallList, E2R_3DDrawCall);
 
-void e2r_reset_ui_data();
-void e2r_reset_text_data();
 void e2r_draw_quad(v2 pos, v2 size, v4 color);
 void e2r_draw_circle(v2 pos, v2 size, v4 color);
 void e2r_draw_char(char ch, f32 *pen_x, f32 * pen_y, const FontAtlas *font_atlas, v4 color);
 void e2r_draw_string(const char *str, f32 *pen_x, f32 *pen_y, const FontAtlas *font_atlas, v4 color);
 void e2r_draw_line(const char *str, f32 *pen_x, f32 *pen_y, const FontAtlas *font_atlas, v4 color);
-
 E2R_UIRenderData e2r_get_ui_render_data();
-E2R_UIRenderData e2r_get_text_render_data();
+void e2r_reset_ui_data();
+
+// ============================================
 
 void e2r_draw_cube(m4 model);
-
 E2R_3DRenderData e2r_get_cubes_render_data();
-
 const E2R_3DDrawCallList *e2r_get_cubes_draw_calls();
 void e2r_reset_cubes_data();

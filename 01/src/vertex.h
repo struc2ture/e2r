@@ -3,13 +3,6 @@
 #include <vulkan/vulkan.h>
 #include "common/types.h"
 
-typedef struct Vertex2D
-{
-    v3 pos;
-    v4 color;
-
-} Vertex2D;
-
 typedef struct VertexUI
 {
     v3 pos;

@@ -21,16 +21,6 @@ typedef struct _UIQuad
 
 } _UIQuad;
 
-typedef struct _TextQuad
-{
-    v2 pos_min;
-    v2 pos_max;
-    v2 uv_min;
-    v2 uv_max;
-    v4 color;
-
-} _TextQuad;
-
 typedef struct _Cube
 {
     m4 model;
@@ -38,7 +28,6 @@ typedef struct _Cube
 } _Cube;
 
 list_define_type(_UIQuadList, _UIQuad);
-list_define_type(_TextQuadList, _TextQuad);
 list_define_type(_CubeList, _Cube);
 
 typedef struct _DrawData
@@ -46,10 +35,6 @@ typedef struct _DrawData
     _UIQuadList ui_quad_list;
     E2R_UIVertList ui_vert_list;
     E2R_IndexList ui_index_list;
-
-    _TextQuadList text_quad_list;
-    E2R_UIVertList text_vert_list;
-    E2R_IndexList text_index_list;
 
     _CubeList cube_list;
     E2R_3DVertList cube_vert_list;
@@ -60,7 +45,7 @@ typedef struct _DrawData
 
 globvar _DrawData draw_data;
 
-// ------------------------------------------------
+// ===============================================
 
 static void _ui_get_atlas_q_verts(v2i cell_p, v2 out_verts[4])
 {
@@ -94,26 +79,9 @@ static void _ui_get_atlas_q_verts(v2i cell_p, v2 out_verts[4])
     out_verts[1].x = max_x; out_verts[1].y = min_y;
     out_verts[2].x = max_x; out_verts[2].y = max_y;
     out_verts[3].x = min_x; out_verts[3].y = max_y;
-
-    // for (int i = 0; i < 4; i++)
-    //     trace("atlas_vert[%d]: %f, %f", i, out_verts[i].x, out_verts[i].y);
 }
 
-// ------------------------------------------------
-
-void e2r_reset_ui_data()
-{
-    list_clear(&draw_data.ui_quad_list);
-    list_clear(&draw_data.ui_vert_list);
-    list_clear(&draw_data.ui_index_list);
-}
-
-void e2r_reset_text_data()
-{
-    list_clear(&draw_data.text_quad_list);
-    list_clear(&draw_data.text_vert_list);
-    list_clear(&draw_data.text_index_list);
-}
+// ===============================================
 
 void e2r_draw_quad(v2 pos, v2 size, v4 color)
 {
@@ -269,59 +237,14 @@ E2R_UIRenderData e2r_get_ui_render_data()
     };
 }
 
-E2R_UIRenderData e2r_get_text_render_data()
+void e2r_reset_ui_data()
 {
-    _TextQuadList *quad_list = &draw_data.text_quad_list;
-    E2R_UIVertList *vert_list = &draw_data.text_vert_list;
-    E2R_IndexList *index_list = &draw_data.text_index_list;
-
-    const _TextQuad *quad;
-    list_iterate(quad_list, quad_i ,quad)
-    {
-        v2 min = quad->pos_min;
-        v2 max = quad->pos_max;
-
-        v3 pos[] =
-        {
-            V3(quad->pos_min.x, quad->pos_min.y, 0.0f),
-            V3(quad->pos_max.x, quad->pos_min.y, 0.0f),
-            V3(quad->pos_max.x, quad->pos_max.y, 0.0f),
-            V3(quad->pos_min.x, quad->pos_max.y, 0.0f)
-        };
-
-        v2 uv[] = 
-        {
-            V2(quad->uv_min.x, quad->uv_min.y),
-            V2(quad->uv_max.x, quad->uv_min.y),
-            V2(quad->uv_max.x, quad->uv_max.y),
-            V2(quad->uv_min.x, quad->uv_max.y),
-        };
-
-        u32 base_index = vert_list->size;
-
-        for (int i = 0; i < 4; i++)
-        {
-            VertexUI v =
-            {
-                .pos = pos[i],
-                .uv = uv[i],
-                .color = quad->color
-            };
-            list_append(vert_list, v);
-        }
-
-        u32 indices[] = { 0, 1, 2, 0, 2, 3};
-        for (int i = 0; i < 6; i++)
-        {
-            list_append(index_list, indices[i] + base_index);
-        }
-    }
-
-    return (E2R_UIRenderData){
-        .vert_list = vert_list,
-        .index_list = index_list
-    };
+    list_clear(&draw_data.ui_quad_list);
+    list_clear(&draw_data.ui_vert_list);
+    list_clear(&draw_data.ui_index_list);
 }
+
+// ===============================================
 
 void e2r_draw_cube(m4 model)
 {

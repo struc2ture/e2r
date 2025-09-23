@@ -177,9 +177,7 @@ typedef struct E2R_Ctx
     Vk_TextureBundle ui_atlas_texture;
     Vk_TextureBundle font_atlas_texture;
 
-    Vk_PipelineBundle vk_tri_pipeline_bundle;
     Vk_PipelineBundle vk_ui_pipeline_bundle;
-    Vk_PipelineBundle vk_text_pipeline_bundle;
     Vk_PipelineBundle vk_cubes_pipeline_bundle;
 
     bool rebuild_swapchain;
@@ -1064,221 +1062,6 @@ Vk_TextureBundle _vk_load_texture_from_font_atlas(const FontAtlas *atlas)
     return texture_bundle;
 }
 
-Vk_PipelineBundle _vk_create_pipeline_bundle_tri()
-{
-    const char *vert_shader_path = "bin/shaders/tri.vert.spv";
-    const char *frag_shader_path = "bin/shaders/tri.frag.spv";
-
-    Vk_PipelineBundle pipeline_bundle =
-    {
-        .max_vertex_count = MAX_VERTEX_COUNT,
-    };
-
-    u32 frame_count = FRAMES_IN_FLIGHT;
-
-    VkResult result;
-
-    const u32 ubo_count = 1;
-    VkDescriptorSetLayout descriptor_set_layout;
-    {
-        // Global 2D UBO
-        VkDescriptorSetLayoutBinding descriptor_set_layout_binding_0 = {};
-        descriptor_set_layout_binding_0.binding = 0;
-        descriptor_set_layout_binding_0.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptor_set_layout_binding_0.descriptorCount = 1;
-        descriptor_set_layout_binding_0.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] = {descriptor_set_layout_binding_0};
-        VkDescriptorSetLayoutCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        create_info.bindingCount = array_count(descriptor_set_layout_bindings);
-        create_info.pBindings = descriptor_set_layout_bindings;
-
-        result = vkCreateDescriptorSetLayout(ctx.vk_device, &create_info, NULL, &descriptor_set_layout);
-        if (result != VK_SUCCESS) fatal("Failed to create descriptor set layout");
-    }
-
-    VkPipelineLayout pipeline_layout;
-    {
-        VkPipelineLayoutCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        create_info.setLayoutCount = 1;
-        create_info.pSetLayouts = &descriptor_set_layout;
-
-        result = vkCreatePipelineLayout(ctx.vk_device, &create_info, NULL, &pipeline_layout);
-        if (result != VK_SUCCESS) fatal("Failed to create pipeline layout");
-    }
-
-    pipeline_bundle.vertex_buffer_bundle = _vk_create_buffer_bundle(
-        pipeline_bundle.max_vertex_count * sizeof(Vertex2D),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-    );
-
-    pipeline_bundle.descriptor_set_layout = descriptor_set_layout;
-    pipeline_bundle.pipeline_layout = pipeline_layout;
-
-    VkDescriptorPool descriptor_pool;
-    {
-        VkDescriptorPoolSize descriptor_pool_sizes[1] = {};
-        descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptor_pool_sizes[0].descriptorCount = frame_count * ubo_count;
-
-        VkDescriptorPoolCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        create_info.poolSizeCount = array_count(descriptor_pool_sizes);
-        create_info.pPoolSizes = descriptor_pool_sizes;
-        create_info.maxSets = frame_count;
-
-        result = vkCreateDescriptorPool(ctx.vk_device, &create_info, NULL, &descriptor_pool);
-        if (result != VK_SUCCESS) fatal("Failed to create descriptor pool");
-    }
-
-    VkDescriptorSet *descriptor_sets = xmalloc(frame_count * sizeof(descriptor_sets[0]));
-    for (u32 i = 0; i < frame_count; i++)
-    {
-        // Allocate descriptor set
-        {
-            VkDescriptorSetAllocateInfo allocate_info = {};
-            allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocate_info.descriptorPool = descriptor_pool;
-            allocate_info.descriptorSetCount = 1;
-            allocate_info.pSetLayouts = &descriptor_set_layout;
-
-            result = vkAllocateDescriptorSets(ctx.vk_device, &allocate_info, &descriptor_sets[i]);
-            if (result != VK_SUCCESS) fatal("Failed to allocate descriptor set");
-        }
-
-        // Update descriptor set: 2D UBO
-        {
-            const Vk_BufferBundle *buffer_bundle = &ctx.global_ubo_2d.buffer_bundles[i];
-            VkDescriptorBufferInfo descriptor_buffer_info = {};
-            descriptor_buffer_info.buffer = buffer_bundle->buffer;
-            descriptor_buffer_info.offset = 0;
-            descriptor_buffer_info.range = buffer_bundle->size;
-
-            VkWriteDescriptorSet write_descriptor_set = {};
-            write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write_descriptor_set.dstSet = descriptor_sets[i];
-            write_descriptor_set.dstBinding = 0;
-            write_descriptor_set.dstArrayElement = 0;
-            write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            write_descriptor_set.descriptorCount = 1;
-            write_descriptor_set.pBufferInfo = &descriptor_buffer_info;
-
-            vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
-        }
-    }
-
-    pipeline_bundle.descriptor_pool = descriptor_pool;
-    pipeline_bundle.descriptor_sets = descriptor_sets;
-    pipeline_bundle.descriptor_set_count = frame_count;
-
-    VkPipeline pipeline;
-    {
-        VkShaderModule vert_shader_module = _vk_create_shader_module(vert_shader_path);
-        VkShaderModule frag_shader_module = _vk_create_shader_module(frag_shader_path);
-
-        VkPipelineShaderStageCreateInfo shader_stages[2] = {};
-        shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        shader_stages[0].module = vert_shader_module;
-        shader_stages[0].pName = "main";
-        shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        shader_stages[1].module = frag_shader_module;
-        shader_stages[1].pName = "main";
-
-        VkVertexInputBindingDescription vertex_input_binding_description = {};
-        vertex_input_binding_description.binding = 0;
-        vertex_input_binding_description.stride = sizeof(Vertex2D);
-        vertex_input_binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-        int vert_attrib_count = 2;
-        VkVertexInputAttributeDescription *vertex_input_attribute_descriptions = xmalloc(vert_attrib_count * sizeof(vertex_input_attribute_descriptions[0]));
-        vertex_input_attribute_descriptions[0] = (VkVertexInputAttributeDescription){
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = offsetof(Vertex2D, pos)
-        };
-        vertex_input_attribute_descriptions[1] = (VkVertexInputAttributeDescription){
-            .location = 1,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .offset = offsetof(Vertex2D, color)
-        };
-
-        VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
-        vertex_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertex_input_state.vertexBindingDescriptionCount = 1;
-        vertex_input_state.pVertexBindingDescriptions = &vertex_input_binding_description;
-        vertex_input_state.vertexAttributeDescriptionCount = vert_attrib_count;
-        vertex_input_state.pVertexAttributeDescriptions = vertex_input_attribute_descriptions;
-
-        VkPipelineInputAssemblyStateCreateInfo input_assembly_state = {};
-        input_assembly_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-        VkViewport viewport = {0, 0, (float)ctx.vk_swapchain_bundle.extent.width, (float)ctx.vk_swapchain_bundle.extent.height, 0.0f, 1.0f};
-        VkRect2D scissor = {{0, 0}, {ctx.vk_swapchain_bundle.extent.width, ctx.vk_swapchain_bundle.extent.height}};
-        VkPipelineViewportStateCreateInfo viewport_state = {};
-        viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-        viewport_state.viewportCount = 1;
-        viewport_state.pViewports = &viewport;
-        viewport_state.scissorCount = 1;
-        viewport_state.pScissors = &scissor;
-
-        VkPipelineRasterizationStateCreateInfo rasterization_state = {};
-        rasterization_state.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterization_state.lineWidth = 1.0f;
-        rasterization_state.cullMode = VK_CULL_MODE_NONE;
-        rasterization_state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-        VkPipelineMultisampleStateCreateInfo multisample_state = {};
-        multisample_state.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-        VkPipelineColorBlendAttachmentState color_blend_attachment = {};
-        color_blend_attachment.colorWriteMask = (VK_COLOR_COMPONENT_R_BIT |
-                                                                VK_COLOR_COMPONENT_G_BIT |
-                                                                VK_COLOR_COMPONENT_B_BIT |
-                                                                VK_COLOR_COMPONENT_A_BIT);
-        color_blend_attachment.blendEnable = VK_FALSE;
-
-        VkPipelineColorBlendStateCreateInfo color_blend_state = {};
-        color_blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        color_blend_state.attachmentCount = 1;
-        color_blend_state.pAttachments = &color_blend_attachment;
-
-        VkGraphicsPipelineCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        create_info.stageCount = array_count(shader_stages);
-        create_info.pStages = shader_stages;
-        create_info.pVertexInputState = &vertex_input_state;
-        create_info.pInputAssemblyState = &input_assembly_state;
-        create_info.pViewportState = &viewport_state;
-        create_info.pRasterizationState = &rasterization_state;
-        create_info.pMultisampleState = &multisample_state;
-        create_info.pColorBlendState = &color_blend_state;
-        create_info.layout = pipeline_layout;
-        create_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
-        create_info.subpass = 0;
-        
-        result = vkCreateGraphicsPipelines(ctx.vk_device, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline);
-        if (result != VK_SUCCESS) fatal("Failed to create graphics pipeline");
-
-        free(vertex_input_attribute_descriptions);
-
-        vkDestroyShaderModule(ctx.vk_device, vert_shader_module, NULL);
-        vkDestroyShaderModule(ctx.vk_device, frag_shader_module, NULL);
-    }
-
-    pipeline_bundle.pipeline = pipeline;
-
-    return pipeline_bundle;
-}
-
 Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
 {
     const char *vert_shader_path = "bin/shaders/ui.vert.spv";
@@ -1337,7 +1120,7 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
     }
 
     pipeline_bundle.vertex_buffer_bundle = _vk_create_buffer_bundle(
-        pipeline_bundle.max_vertex_count * sizeof(Vertex2D),
+        pipeline_bundle.max_vertex_count * sizeof(VertexUI),
         VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
     );
 
@@ -1474,268 +1257,6 @@ Vk_PipelineBundle _vk_create_pipeline_bundle_ui()
             .binding = 0,
             .format = VK_FORMAT_R32_UINT,
             .offset = offsetof(VertexUI, tex_index)
-        };
-
-        VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
-        vertex_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-        vertex_input_state.vertexBindingDescriptionCount = 1;
-        vertex_input_state.pVertexBindingDescriptions = &vertex_input_binding_description;
-        vertex_input_state.vertexAttributeDescriptionCount = vert_attrib_count;
-        vertex_input_state.pVertexAttributeDescriptions = vertex_input_attribute_descriptions;
-
-        VkPipelineInputAssemblyStateCreateInfo input_assembly_state = {};
-        input_assembly_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-        input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-
-        VkViewport viewport = {0, 0, (float)ctx.vk_swapchain_bundle.extent.width, (float)ctx.vk_swapchain_bundle.extent.height, 0.0f, 1.0f};
-        VkRect2D scissor = {{0, 0}, {ctx.vk_swapchain_bundle.extent.width, ctx.vk_swapchain_bundle.extent.height}};
-        VkPipelineViewportStateCreateInfo viewport_state = {};
-        viewport_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-        viewport_state.viewportCount = 1;
-        viewport_state.pViewports = &viewport;
-        viewport_state.scissorCount = 1;
-        viewport_state.pScissors = &scissor;
-
-        VkPipelineRasterizationStateCreateInfo rasterization_state = {};
-        rasterization_state.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-        rasterization_state.polygonMode = VK_POLYGON_MODE_FILL;
-        rasterization_state.lineWidth = 1.0f;
-        rasterization_state.cullMode = VK_CULL_MODE_NONE;
-        rasterization_state.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-
-        VkPipelineMultisampleStateCreateInfo multisample_state = {};
-        multisample_state.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-        multisample_state.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-        VkPipelineColorBlendAttachmentState color_blend_attachment = {};
-        color_blend_attachment.colorWriteMask = (VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT);
-        color_blend_attachment.blendEnable = VK_TRUE;
-        color_blend_attachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-        color_blend_attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        color_blend_attachment.colorBlendOp = VK_BLEND_OP_ADD;
-        color_blend_attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        color_blend_attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
-        color_blend_attachment.alphaBlendOp = VK_BLEND_OP_ADD;
-
-        VkPipelineColorBlendStateCreateInfo color_blend_state = {};
-        color_blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-        color_blend_state.attachmentCount = 1;
-        color_blend_state.pAttachments = &color_blend_attachment;
-
-        VkGraphicsPipelineCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-        create_info.stageCount = array_count(shader_stages);
-        create_info.pStages = shader_stages;
-        create_info.pVertexInputState = &vertex_input_state;
-        create_info.pInputAssemblyState = &input_assembly_state;
-        create_info.pViewportState = &viewport_state;
-        create_info.pRasterizationState = &rasterization_state;
-        create_info.pMultisampleState = &multisample_state;
-        create_info.pColorBlendState = &color_blend_state;
-        create_info.layout = pipeline_layout;
-        create_info.renderPass = ctx.vk_2d_render_pass_bundle.render_pass;
-        create_info.subpass = 0;
-        
-        result = vkCreateGraphicsPipelines(ctx.vk_device, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline);
-        if (result != VK_SUCCESS) fatal("Failed to create graphics pipeline");
-
-        free(vertex_input_attribute_descriptions);
-
-        vkDestroyShaderModule(ctx.vk_device, vert_shader_module, NULL);
-        vkDestroyShaderModule(ctx.vk_device, frag_shader_module, NULL);
-    }
-
-    pipeline_bundle.pipeline = pipeline;
-
-    return pipeline_bundle;
-}
-
-Vk_PipelineBundle _vk_create_pipeline_bundle_text()
-{
-    const char *vert_shader_path = "bin/shaders/text.vert.spv";
-    const char *frag_shader_path = "bin/shaders/text.frag.spv";
-
-    Vk_PipelineBundle pipeline_bundle =
-    {
-        .max_vertex_count = MAX_VERTEX_COUNT,
-        .max_index_count = MAX_INDEX_COUNT
-    };
-
-    u32 frame_count = FRAMES_IN_FLIGHT;
-
-    VkResult result;
-
-    const u32 ubo_count = 1;
-    VkDescriptorSetLayout descriptor_set_layout;
-    {
-        // Global 2D UBO
-        VkDescriptorSetLayoutBinding descriptor_set_layout_binding_0 = {};
-        descriptor_set_layout_binding_0.binding = 0;
-        descriptor_set_layout_binding_0.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptor_set_layout_binding_0.descriptorCount = 1;
-        descriptor_set_layout_binding_0.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        // Texture Sampler
-        VkDescriptorSetLayoutBinding descriptor_set_layout_binding_1 = {};
-        descriptor_set_layout_binding_1.binding = 1;
-        descriptor_set_layout_binding_1.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptor_set_layout_binding_1.descriptorCount = 1;
-        descriptor_set_layout_binding_1.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-        VkDescriptorSetLayoutBinding descriptor_set_layout_bindings[] =
-        {
-            descriptor_set_layout_binding_0,
-            descriptor_set_layout_binding_1
-        };
-        VkDescriptorSetLayoutCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-        create_info.bindingCount = array_count(descriptor_set_layout_bindings);
-        create_info.pBindings = descriptor_set_layout_bindings;
-
-        result = vkCreateDescriptorSetLayout(ctx.vk_device, &create_info, NULL, &descriptor_set_layout);
-        if (result != VK_SUCCESS) fatal("Failed to create descriptor set layout");
-    }
-
-    VkPipelineLayout pipeline_layout;
-    {
-        VkPipelineLayoutCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-        create_info.setLayoutCount = 1;
-        create_info.pSetLayouts = &descriptor_set_layout;
-
-        result = vkCreatePipelineLayout(ctx.vk_device, &create_info, NULL, &pipeline_layout);
-        if (result != VK_SUCCESS) fatal("Failed to create pipeline layout");
-    }
-
-    pipeline_bundle.vertex_buffer_bundle = _vk_create_buffer_bundle(
-        pipeline_bundle.max_vertex_count * sizeof(Vertex2D),
-        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
-    );
-
-    pipeline_bundle.index_buffer_bundle = _vk_create_buffer_bundle(
-        pipeline_bundle.max_index_count * sizeof(VertIndex),
-        VK_BUFFER_USAGE_INDEX_BUFFER_BIT
-    );
-
-    pipeline_bundle.descriptor_set_layout = descriptor_set_layout;
-    pipeline_bundle.pipeline_layout = pipeline_layout;
-
-    VkDescriptorPool descriptor_pool;
-    {
-        VkDescriptorPoolSize descriptor_pool_sizes[2] = {};
-        descriptor_pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        descriptor_pool_sizes[0].descriptorCount = frame_count * ubo_count;
-        descriptor_pool_sizes[1].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        descriptor_pool_sizes[1].descriptorCount = 1;
-
-        VkDescriptorPoolCreateInfo create_info = {};
-        create_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
-        create_info.poolSizeCount = array_count(descriptor_pool_sizes);
-        create_info.pPoolSizes = descriptor_pool_sizes;
-        create_info.maxSets = frame_count;
-
-        result = vkCreateDescriptorPool(ctx.vk_device, &create_info, NULL, &descriptor_pool);
-        if (result != VK_SUCCESS) fatal("Failed to create descriptor pool");
-    }
-
-    VkDescriptorSet *descriptor_sets = xmalloc(frame_count * sizeof(descriptor_sets[0]));
-    for (u32 i = 0; i < frame_count; i++)
-    {
-        // Allocate descriptor set
-        {
-            VkDescriptorSetAllocateInfo allocate_info = {};
-            allocate_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-            allocate_info.descriptorPool = descriptor_pool;
-            allocate_info.descriptorSetCount = 1;
-            allocate_info.pSetLayouts = &descriptor_set_layout;
-
-            result = vkAllocateDescriptorSets(ctx.vk_device, &allocate_info, &descriptor_sets[i]);
-            if (result != VK_SUCCESS) fatal("Failed to allocate descriptor set");
-        }
-
-        // Update descriptor set: 2D UBO
-        {
-            const Vk_BufferBundle *buffer_bundle = &ctx.global_ubo_2d.buffer_bundles[i];
-            VkDescriptorBufferInfo descriptor_buffer_info = {};
-            descriptor_buffer_info.buffer = buffer_bundle->buffer;
-            descriptor_buffer_info.offset = 0;
-            descriptor_buffer_info.range = buffer_bundle->size;
-
-            VkWriteDescriptorSet write_descriptor_set = {};
-            write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write_descriptor_set.dstSet = descriptor_sets[i];
-            write_descriptor_set.dstBinding = 0;
-            write_descriptor_set.dstArrayElement = 0;
-            write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            write_descriptor_set.descriptorCount = 1;
-            write_descriptor_set.pBufferInfo = &descriptor_buffer_info;
-
-            vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
-        }
-
-        // Update descriptor set: texture sampler
-        {
-            VkDescriptorImageInfo descriptor_image_info = {};
-            descriptor_image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-            descriptor_image_info.imageView = ctx.font_atlas_texture.image_view;
-            descriptor_image_info.sampler = ctx.font_atlas_texture.sampler;
-
-            VkWriteDescriptorSet write_descriptor_set = {};
-            write_descriptor_set.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-            write_descriptor_set.dstSet = descriptor_sets[i];
-            write_descriptor_set.dstBinding = 1;
-            write_descriptor_set.dstArrayElement = 0;
-            write_descriptor_set.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            write_descriptor_set.descriptorCount = 1;
-            write_descriptor_set.pImageInfo = &descriptor_image_info;
-
-            vkUpdateDescriptorSets(ctx.vk_device, 1, &write_descriptor_set, 0, NULL);
-        }
-    }
-
-    pipeline_bundle.descriptor_pool = descriptor_pool;
-    pipeline_bundle.descriptor_sets = descriptor_sets;
-    pipeline_bundle.descriptor_set_count = frame_count;
-
-    VkPipeline pipeline;
-    {
-        VkShaderModule vert_shader_module = _vk_create_shader_module(vert_shader_path);
-        VkShaderModule frag_shader_module = _vk_create_shader_module(frag_shader_path);
-
-        VkPipelineShaderStageCreateInfo shader_stages[2] = {};
-        shader_stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shader_stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
-        shader_stages[0].module = vert_shader_module;
-        shader_stages[0].pName = "main";
-        shader_stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-        shader_stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        shader_stages[1].module = frag_shader_module;
-        shader_stages[1].pName = "main";
-
-        VkVertexInputBindingDescription vertex_input_binding_description = {};
-        vertex_input_binding_description.binding = 0;
-        vertex_input_binding_description.stride = sizeof(VertexUI);
-        vertex_input_binding_description.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-        int vert_attrib_count = 3;
-        VkVertexInputAttributeDescription *vertex_input_attribute_descriptions = xmalloc(vert_attrib_count * sizeof(vertex_input_attribute_descriptions[0]));
-        vertex_input_attribute_descriptions[0] = (VkVertexInputAttributeDescription){
-            .location = 0,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32_SFLOAT,
-            .offset = offsetof(VertexUI, pos)
-        };
-        vertex_input_attribute_descriptions[1] = (VkVertexInputAttributeDescription){
-            .location = 1,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32_SFLOAT,
-            .offset = offsetof(VertexUI, uv)
-        };
-        vertex_input_attribute_descriptions[2] = (VkVertexInputAttributeDescription){
-            .location = 2,
-            .binding = 0,
-            .format = VK_FORMAT_R32G32B32A32_SFLOAT,
-            .offset = offsetof(VertexUI, color)
         };
 
         VkPipelineVertexInputStateCreateInfo vertex_input_state = {};
@@ -2239,9 +1760,7 @@ void _vk_create_swapchain_dependent()
     ctx.vk_3d_render_pass_bundle = _vk_create_render_pass_bundle(&ctx.vk_depth_image_bundle, false, false);
     ctx.vk_final_render_pass_bundle = _vk_create_render_pass_bundle(NULL, false, true);
 
-    ctx.vk_tri_pipeline_bundle = _vk_create_pipeline_bundle_tri();
     ctx.vk_ui_pipeline_bundle = _vk_create_pipeline_bundle_ui();
-    ctx.vk_text_pipeline_bundle = _vk_create_pipeline_bundle_text();
     ctx.vk_cubes_pipeline_bundle = _vk_create_pipeline_bundle_cubes();
 
     ctx.first_swapchain_use = true;
@@ -2251,9 +1770,7 @@ void _vk_destroy_swapchain_dependent()
 {
     vkDeviceWaitIdle(ctx.vk_device);
 
-    _vk_destroy_pipeline_bundle(&ctx.vk_tri_pipeline_bundle);
     _vk_destroy_pipeline_bundle(&ctx.vk_ui_pipeline_bundle);
-    _vk_destroy_pipeline_bundle(&ctx.vk_text_pipeline_bundle);
     _vk_destroy_pipeline_bundle(&ctx.vk_cubes_pipeline_bundle);
 
     _vk_destroy_render_pass_bundle(&ctx.vk_clear_render_pass_bundle);
@@ -2350,24 +1867,6 @@ void e2r_init(int width, int height, const char *name)
     ctx.ui_atlas_texture = _vk_load_texture("res/ui_atlas.png");
 
     ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 18.0f, 2.0f, 4);
-
-    // u8 *px_byte = ctx.font_atlas.pixels;
-    // int x, y;
-    // bool any_nonzero = false;
-    // for (y = 0; y < ctx.font_atlas.height; y++)
-    // {
-    //     for (x = 0; x < ctx.font_atlas.width; x++)
-    //     {
-    //         if (*px_byte > 0)
-    //         {
-    //             any_nonzero = true;
-    //             break;
-    //         }
-    //         px_byte += ctx.font_atlas.channels;
-    //     }
-    //     if (any_nonzero) break;
-    // }
-    // bp();
     ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&ctx.font_atlas);
 
     _vk_create_swapchain_dependent();
@@ -2480,17 +1979,6 @@ void _e2r_submit_vert_data()
 
         e2r_reset_ui_data();
     }
-
-    // Text pipeline data
-    // {
-    //     E2R_UIRenderData render_data = e2r_get_text_render_data();
-    //     ctx.text_index_count = render_data.index_list->size;
-
-    //     memcpy(ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.data_ptr, render_data.vert_list->data, render_data.vert_list->size * sizeof(*render_data.vert_list->data));
-    //     memcpy(ctx.vk_text_pipeline_bundle.index_buffer_bundle.data_ptr, render_data.index_list->data, render_data.index_list->size * sizeof(*render_data.index_list->data));
-
-    //     e2r_reset_text_data();
-    // }
 
     // Cubes pipeline data
     {
@@ -2652,22 +2140,6 @@ void _e2r_render()
             render_pass_begin_info.clearValueCount = 0;
             vkCmdBeginRenderPass(frame->command_buffer, &render_pass_begin_info, VK_SUBPASS_CONTENTS_INLINE);
 
-            vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_tri_pipeline_bundle.pipeline);
-            {
-                VkDeviceSize offsets[] = {0};
-                vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_tri_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
-
-                vkCmdBindDescriptorSets(
-                    frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    ctx.vk_tri_pipeline_bundle.pipeline_layout,
-                    0,
-                    1, &ctx.vk_tri_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
-                    0, NULL
-                );
-
-                vkCmdDraw(frame->command_buffer, 3, 1, 0, 0);
-            }
-
             vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_ui_pipeline_bundle.pipeline);
             {
                 VkDeviceSize offsets[] = {0};
@@ -2685,25 +2157,6 @@ void _e2r_render()
 
                 vkCmdDrawIndexed(frame->command_buffer, ctx.ui_index_count, 1, 0, 0, 0);
                 ctx.ui_index_count = 0;
-            }
-
-            vkCmdBindPipeline(frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.vk_text_pipeline_bundle.pipeline);
-            {
-                VkDeviceSize offsets[] = {0};
-                vkCmdBindVertexBuffers(frame->command_buffer, 0, 1, &ctx.vk_text_pipeline_bundle.vertex_buffer_bundle.buffer, offsets);
-
-                vkCmdBindIndexBuffer(frame->command_buffer, ctx.vk_text_pipeline_bundle.index_buffer_bundle.buffer, 0, VERT_INDEX_TYPE);
-
-                vkCmdBindDescriptorSets(
-                    frame->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS,
-                    ctx.vk_text_pipeline_bundle.pipeline_layout,
-                    0,
-                    1, &ctx.vk_text_pipeline_bundle.descriptor_sets[ctx.current_vk_frame],
-                    0, NULL
-                );
-
-                vkCmdDrawIndexed(frame->command_buffer, ctx.text_index_count, 1, 0, 0, 0);
-                ctx.text_index_count = 0;
             }
 
             vkCmdEndRenderPass(frame->command_buffer);
