@@ -3,6 +3,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define fatal(FMT, ...) do { \
     fprintf(stderr, "[FATAL: %s:%d:%s]: " FMT "\n", __FILE__, __LINE__, __func__, ##__VA_ARGS__); \
@@ -122,6 +123,13 @@ static void *xrealloc(void *data, size_t new_size)
     void *new_data = realloc(data, new_size);
     if (!new_data) fatal("realloc failed for %zu", new_size);
     return new_data;
+}
+
+static void *xstrdup(const char *str)
+{
+    char *new = strdup(str);
+    if (!new) fatal("strdup failed for %s", str);
+    return new;
 }
 
 static char *strf(const char *fmt, ...)

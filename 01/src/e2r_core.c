@@ -1866,7 +1866,7 @@ void e2r_init(int width, int height, const char *name)
     ctx.ducks_texture = _vk_load_texture("res/DUCKS.png");
     ctx.ui_atlas_texture = _vk_load_texture("res/ui_atlas.png");
 
-    ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 18.0f, 2.0f, 4);
+    ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 18.0f, 1.0f, 4);
     ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&ctx.font_atlas);
 
     _vk_create_swapchain_dependent();

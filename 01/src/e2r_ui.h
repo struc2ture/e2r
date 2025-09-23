@@ -16,13 +16,15 @@ typedef struct E2R_UI_Window
 {
     v2 size;
     v2 pos;
-    v4 bg_color;
+    const char *title;
 
     E2R_UI_BulletListList bullet_lists;
 
 } E2R_UI_Window;
 
-E2R_UI_Window *e2r_ui__create_window(v2 pos, v2 size, v4 bg_color);
+void e2r_ui__init();
+
+E2R_UI_Window *e2r_ui__create_window(v2 pos, v2 size, const char *title);
 void e2r_ui__destroy_window(E2R_UI_Window *window);
 
 void e2r_ui__render_bullet_list(f32 *pen_x, f32 *pen_y, E2R_UI_BulletList *bullet_list);
