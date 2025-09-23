@@ -101,10 +101,11 @@ int main()
 
     app_ctx.light_pos = V3(10.0f, 0.0f, 0.0f);
 
-    E2R_UI_Window *window1 = e2r_ui__create_window(V2(100.0f, 100.0f), V2(100.0f, 100.0f), V4(0.4f, 0.4f, 0.4f, 1.0f));
+    E2R_UI_Window *window2 = e2r_ui__create_window(V2(300.0f, 300.0f), V2(200.0f, 200.0f), V4(0.4f, 0.4f, 0.4f, 1.0f));
+    E2R_UI_Window *window1 = e2r_ui__create_window(V2(100.0f, 100.0f), V2(300.0f, 300.0f), V4(0.4f, 0.4f, 0.4f, 1.0f));
     E2R_UI_BulletList *bullet_list1 = e2r_ui__add_bullet_list(window1);
     E2R_UI_BulletList *bullet_list2 = e2r_ui__add_bullet_list(window1);
-    E2R_UI_Window *window2 = e2r_ui__create_window(V2(250.0f, 250.0f), V2(100.0f, 100.0f), V4(0.4f, 0.4f, 0.4f, 1.0f));
+    E2R_UI_BulletList *bullet_list3 = e2r_ui__add_bullet_list(window2);
 
     bool show_bullet_items = true;
 

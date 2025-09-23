@@ -20,6 +20,26 @@ typedef struct _UICtx
 globvar _UICtx __ui_ctx;
 globvar _UICtx *_ui_ctx = &__ui_ctx;
 
+// =====================================
+
+void _draw_vline(f32 x, f32 y_min, f32 y_max, f32 width, v4 color)
+{
+    f32 half_width = width * 0.5f;
+    v2 min = V2(x - half_width, y_min - half_width);
+    v2 size = V2(width, y_max - y_min + width);
+    e2r_draw_quad(min, size, color);
+}
+
+void _draw_hline(f32 x_min, f32 x_max, f32 y, f32 width, v4 color)
+{
+    f32 half_width = width * 0.5f;
+    v2 min = V2(x_min - half_width, y - half_width);
+    v2 size = V2(x_max - x_min + width, width);
+    e2r_draw_quad(min, size, color);
+}
+
+// =====================================
+
 E2R_UI_Window *e2r_ui__create_window(v2 pos, v2 size, v4 bg_color)
 {
     E2R_UI_Window *window = xmalloc(sizeof(*window));
@@ -75,6 +95,14 @@ void e2r_ui__render_window(E2R_UI_Window *window)
 {
     const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
     e2r_draw_quad(window->pos, window->size, window->bg_color);
+    f32 border_width = 2.0f;
+    v4 border_color = V4(0.7f, 0.7f, 0.7f, 1.0f);
+    v2 window_min = window->pos;
+    v2 window_max = v2_add(window->pos, window->size);
+    _draw_vline(window_min.x, window_min.y, window_max.y, border_width, border_color);
+    _draw_vline(window_max.x, window_min.y, window_max.y, border_width, border_color);
+    _draw_hline(window_min.x, window_max.x, window_min.y, border_width, border_color);
+    _draw_hline(window_min.x, window_max.x, window_max.y, border_width, border_color);
 
     E2R_UI_BulletList *bullet_list;
     f32 pen_x = window->pos.x + 4.0f;
