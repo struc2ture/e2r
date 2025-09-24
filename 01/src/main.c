@@ -103,13 +103,23 @@ int main()
 
     e2r_ui__init();
 
-    // E2R_UI_Window *window2 = e2r_ui__create_window(V2(300.0f, 300.0f), V2(200.0f, 200.0f));
+    const char *button_txt1 = "Press me!";
+    const char *button_txt2 = "Oh no, unpress me!!!";
+
     E2R_UI_Window *window1 = e2r_ui__create_window(V2(100.0f, 100.0f), V2(300.0f, 300.0f), "Hello world!");
-    E2R_UI_BulletList *bullet_list1 = e2r_ui__add_bullet_list(window1);
-    E2R_UI_BulletList *bullet_list2 = e2r_ui__add_bullet_list(window1);
-    // E2R_UI_BulletList *bullet_list3 = e2r_ui__add_bullet_list(window2);
-    E2R_UI_Button *button = e2r_ui__add_button(window1, V2(310.0f, 350.0f), V2(50.0f, 50.0f));
+    // E2R_UI_BulletList *bullet_list1 = e2r_ui__add_bullet_list(window1);
+    // E2R_UI_BulletList *bullet_list2 = e2r_ui__add_bullet_list(window1);
+
+    // E2R_UI_Button *button = e2r_ui__add_button(window1, V2(310.0f, 350.0f), button_txt1);
     bool show_bullet_items = true;
+
+    const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
+    StringRect string_rect = font_loader_get_string_rect(font_atlas, "Hello world");
+    f32 ascender = font_atlas->ascender;
+
+    bp();
+
+    bool button_pressed = false;
 
     while (e2r_is_running())
     {
@@ -166,16 +176,17 @@ int main()
             show_bullet_items = !show_bullet_items;
         }
 
-        if (show_bullet_items)
-        {
-            e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 1");
-            e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 2");
-        }
+        // if (show_bullet_items)
+        // {
+        //     e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 1");
+        //     e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 2");
+        // }
 
-        if (e2r_ui__is_button_pressed(button))
-        {
-            trace("button pressed");
-        }
+        // if (e2r_ui__is_button_pressed(button))
+        // {
+        //     button_pressed = !button_pressed;
+        //     e2r_ui__set_button_text(button, button_pressed ? button_txt2 : button_txt1);
+        // }
         
         e2r_ui__end_frame();
 

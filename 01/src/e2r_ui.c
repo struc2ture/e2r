@@ -26,6 +26,7 @@ typedef struct _UIStyling
     f32 window_padding;
     f32 window_border_width;
     v4 text_color;
+    f32 button_padding;
 
 } _UIStyling;
 
@@ -82,8 +83,13 @@ void _update_implicit_interactions()
             v2 mouse_delta =e2r_get_mouse_delta();
             window->pos.x += mouse_delta.x;
             window->pos.y += mouse_delta.y;
-            // trace("window->pos = %f, %f", window->pos.x, window->pos.y);
         }
+
+        E2R_UI_Button *button_it;
+        // list_iterate(&window->buttons, button_i, button_it)
+        // {
+            
+        // }
     }
 }
 
@@ -105,11 +111,28 @@ void _render_bullet_list(f32 *pen_x, f32 *pen_y, E2R_UI_BulletList *bullet_list)
     list_clear(&bullet_list->bullet_items);
 }
 
-void _render_button(E2R_UI_Button *button)
-{
-    // const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
-    e2r_draw_quad(button->pos, button->size, V4(1.0f, 1.0f, 1.0f, 1.0f));
-}
+// void _render_button(f32 *pen_x, f32 *pen_y, E2R_UI_Button *button)
+// {
+//     if (button->text)
+//     {
+//         const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
+//         const f32 pad = 4.0f;
+//         StringRect text_rect = font_loader_get_string_rect(font_atlas, button->text);
+//         f32 text_w = text_rect.max_x - text_rect.min_x;
+//         f32 text_h = text_rect.max_y - text_rect.min_y;
+
+//         e2r_draw_quad(button->pos, button->size, V4(0.0f, 0.0f, 0.0f, 1.0f));
+
+//         f32 text_x = button->pos.x + pad + button->size.x * 0.5f - text_w * 0.5f;
+//         f32 text_y = button->pos.y - text_rect.min_y + button->size.y * 0.5f - text_h * 0.5f;
+
+//         e2r_draw_line(button->text, &text_x, &text_y, font_atlas, _ui_styling->text_color);
+//     }
+//     else
+//     {
+//         e2r_draw_quad(button->pos, button->size, V4(0.0f, 0.0f, 0.0f, 1.0f));
+//     }
+// }
 
 void _render_window(E2R_UI_Window *window)
 {
@@ -150,17 +173,17 @@ void _render_window(E2R_UI_Window *window)
     E2R_UI_BulletList *bullet_list;
     f32 pen_x = window_min.x + pad;
     f32 pen_y = separator_y + pad;
-    list_iterate(&window->bullet_lists, bullet_list_i, bullet_list)
-    {
-        _render_bullet_list(&pen_x, &pen_y, bullet_list);
-        pen_y += item_offset;
-    }
+    // list_iterate(&window->bullet_lists, bullet_list_i, bullet_list)
+    // {
+    //     _render_bullet_list(&pen_x, &pen_y, bullet_list);
+    //     pen_y += item_offset;
+    // }
 
-    E2R_UI_Button *button;
-    list_iterate(&window->buttons, button_i, button)
-    {
-        _render_button(button);
-    }
+    // E2R_UI_Button *button;
+    // list_iterate(&window->buttons, button_i, button)
+    // {
+    //     _render_button(&pen_x, &pen_y, button);
+    // }
 }
 
 void _render_windows()
@@ -179,6 +202,64 @@ void _render()
 
 // =====================================
 
+void _recalculate_widget_size(E2R_UI_Widget *w)
+{
+    const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
+    switch (w->kind)
+    {
+        case E2R_UI_WIDGET_LABEL:
+        {
+            StringRect text_rect = font_loader_get_string_rect(font_atlas, w->label.text);
+            w->size = V2(text_rect.max_x, text_rect.max_y);
+        }
+        break;
+
+        case E2R_UI_WIDGET_BULLET_LIST:
+        {
+            const char **bullet_item;
+            f32 max_x = 0.0f;
+            f32 y = 0.0f;
+            f32 ascender = font_loader_get_ascender(font_atlas);
+            list_iterate(&w->bullet_list.bullet_items, bullet_item_i, bullet_item)
+            {
+                StringRect text_rect = font_loader_get_string_rect(font_atlas, *bullet_item);
+                if (text_rect.max_x > max_x) max_x = text_rect.max_x;
+                // y += ascender
+            }
+            
+        }
+        break;
+
+        case E2R_UI_WIDGET_BUTTON:
+        {
+            StringRect text_rect = font_loader_get_string_rect(font_atlas, w->button.text);
+            f32 text_w = text_rect.max_x - text_rect.min_x;
+            f32 text_h = text_rect.max_y - text_rect.min_y;
+            w->size = V2(text_w + 2 * _ui_styling->button_padding, text_h + 2 * _ui_styling->button_padding);
+        }
+        break;
+    }
+}
+
+void _recalculate_window_layout(E2R_UI_Window *window)
+{
+    f32 pen_x = window->pos.x;
+    f32 pen_y = window->pos.y;
+
+    pen_x += _ui_styling->window_padding;
+    pen_y += _ui_styling->window_padding;
+
+    E2R_UI_Widget *widget;
+    list_iterate(&window->widget_list, widget_i, widget)
+    {
+        widget->pos = V2(pen_x, pen_y);
+
+        _recalculate_widget_size(widget);
+    }
+}
+
+// =====================================
+
 void e2r_ui__init()
 {
     _ui_styling->window_bg_color = V4(0.2f, 0.2f, 0.2f, 1.0f);
@@ -188,6 +269,7 @@ void e2r_ui__init()
     _ui_styling->window_padding = 2.0f;
     _ui_styling->window_border_width = 2.0f;
     _ui_styling->text_color = V4(1.0f, 1.0f, 1.0f, 1.0f);
+    _ui_styling->button_padding = 4.0f;
 }
 
 void e2r_ui__begin_frame()
@@ -206,7 +288,6 @@ E2R_UI_Window *e2r_ui__create_window(v2 pos, v2 size, const char *title)
     *window = (E2R_UI_Window){
         .pos = pos,
         .size = size,
-        .bullet_lists = (E2R_UI_BulletListList){},
         .title = xstrdup(title)
     };
 
@@ -232,47 +313,57 @@ void e2r_ui__destroy_window(E2R_UI_Window *window)
     list_erase(&_ui_ctx->window_list, delete_index);
 }
 
-E2R_UI_BulletList *e2r_ui__add_bullet_list(E2R_UI_Window *window)
-{
-    E2R_UI_BulletList bullet_list = {};
-    list_append(&window->bullet_lists, bullet_list);
-    return &window->bullet_lists.data[window->bullet_lists.size - 1];
-}
+// ==========================================
 
-void e2r_ui__submit_bullet_list_item(E2R_UI_BulletList *bullet_list, const char *item)
+E2R_UI_Widget *e2r_ui__add_label(E2R_UI_Window *window)
 {
-    // TODO: This will not work if the underlying str pointer changes
-    // Will work for code segment strings for now
-    list_append(&bullet_list->bullet_items, item);
-}
-
-E2R_UI_Button *e2r_ui__add_button(E2R_UI_Window *window, v2 pos, v2 size)
-{
-    E2R_UI_Button button = {
-        .pos = pos,
-        .size = size
+    E2R_UI_Widget widget = {
+        .kind = E2R_UI_WIDGET_LABEL
     };
-    list_append(&window->buttons, button);
-    return &window->buttons.data[window->buttons.size - 1];
+    list_append(&window->widget_list, widget);
+    return &window->widget_list.data[window->widget_list.size - 1];
 }
 
-void e2r_ui__set_button_text(E2R_UI_Button *button, const char *text)
+E2R_UI_Widget *e2r_ui__add_bullet_list(E2R_UI_Window *window)
 {
+    E2R_UI_Widget widget = {
+        .kind = E2R_UI_WIDGET_BULLET_LIST
+    };
+    list_append(&window->widget_list, widget);
+    return &window->widget_list.data[window->widget_list.size - 1];
+}
+
+E2R_UI_Widget *e2r_ui__add_button(E2R_UI_Window *window)
+{
+    E2R_UI_Widget widget = {
+        .kind = E2R_UI_WIDGET_BUTTON
+    };
+    list_append(&window->widget_list, widget);
+    return &window->widget_list.data[window->widget_list.size - 1];
+}
+
+// ==========================================
+
+void e2r_ui__set_label_text(E2R_UI_Widget *w, const char *text)
+{
+    bassert(w->kind == E2R_UI_WIDGET_LABEL);
     // TODO: This will not work if the underlying str pointer changes
     // Will work for code segment strings for now
-    button->text = text;
+    w->button.text = text;
 }
 
-bool e2r_ui__is_button_pressed(E2R_UI_Button *button)
+void e2r_ui__add_bullet_list_item(E2R_UI_Widget *w, const char *item)
 {
-    v2 mouse_pos = e2r_get_mouse_pos();
-    const v2 window_min = button->pos;
-    const v2 window_max = v2_add(button->pos, button->size);
+    bassert(w->kind == E2R_UI_WIDGET_BULLET_LIST);
+    // TODO: This will not work if the underlying str pointer changes
+    // Will work for code segment strings for now
+    list_append(&w->bullet_list.bullet_items, item);
+}
 
-    if (mouse_pos.x > window_min.x && mouse_pos.x < window_max.x &&
-        mouse_pos.y > window_min.y && mouse_pos.y < window_max.y)
-    {
-        return e2r_is_mouse_down(GLFW_MOUSE_BUTTON_LEFT);
-    }
-    return false;
+void e2r_ui__set_button_text(E2R_UI_Widget *w, const char *text)
+{
+    bassert(w->kind == E2R_UI_WIDGET_BUTTON);
+    // TODO: This will not work if the underlying str pointer changes
+    // Will work for code segment strings for now
+    w->button.text = text;
 }
