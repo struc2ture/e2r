@@ -21,6 +21,8 @@ typedef struct
 {
     const char *text;
     bool is_active;
+    bool is_pressed;
+    bool is_hovered;
 
 } E2R_UI_Button;
 
@@ -31,11 +33,13 @@ typedef enum {
 
 } E2R_UI_WidgetKind;
 
+struct E2R_UI_Window;
 typedef struct
 {
     E2R_UI_WidgetKind kind;
     v2 pos;
     v2 size;
+    struct E2R_UI_Window *window;
     union
     {
         E2R_UI_Label label;
@@ -71,5 +75,8 @@ E2R_UI_Widget *e2r_ui__add_label(E2R_UI_Window *window);
 E2R_UI_Widget *e2r_ui__add_bullet_list(E2R_UI_Window *window);
 E2R_UI_Widget *e2r_ui__add_button(E2R_UI_Window *window);
 
+void e2r_ui__set_label_text(E2R_UI_Widget *w, const char *text);
 void e2r_ui__add_bullet_list_item(E2R_UI_Widget *w, const char *item);
 void e2r_ui__set_button_text(E2R_UI_Widget *w, const char *text);
+
+bool e2r_ui__is_button_pressed(E2R_UI_Widget *w);

@@ -107,19 +107,26 @@ int main()
     const char *button_txt2 = "Oh no, unpress me!!!";
 
     E2R_UI_Window *window1 = e2r_ui__create_window(V2(100.0f, 100.0f), V2(300.0f, 300.0f), "Hello world!");
-    // E2R_UI_BulletList *bullet_list1 = e2r_ui__add_bullet_list(window1);
-    // E2R_UI_BulletList *bullet_list2 = e2r_ui__add_bullet_list(window1);
 
-    // E2R_UI_Button *button = e2r_ui__add_button(window1, V2(310.0f, 350.0f), button_txt1);
+    E2R_UI_Widget *label = e2r_ui__add_label(window1);
+    e2r_ui__set_label_text(label, "Hellooooo!!!");
+
+    E2R_UI_Widget *label2 = e2r_ui__add_label(window1);
+    e2r_ui__set_label_text(label2, "Goodbye:(");
+
+    E2R_UI_Widget *label3 = e2r_ui__add_label(window1);
+    e2r_ui__set_label_text(label3, "HAHA");
+
+    E2R_UI_Widget *bullet_list1 = e2r_ui__add_bullet_list(window1);
+    e2r_ui__add_bullet_list_item(bullet_list1, "Hello 1");
+    e2r_ui__add_bullet_list_item(bullet_list1, "Hello 2");
+    e2r_ui__add_bullet_list_item(bullet_list1, "Hello 3");
+
+    E2R_UI_Widget *button = e2r_ui__add_button(window1);
+    e2r_ui__set_button_text(button, button_txt1);
+    bool button_toggled = false;
+
     bool show_bullet_items = true;
-
-    const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
-    StringRect string_rect = font_loader_get_string_rect(font_atlas, "Hello world");
-    f32 ascender = font_atlas->ascender;
-
-    bp();
-
-    bool button_pressed = false;
 
     while (e2r_is_running())
     {
@@ -174,6 +181,12 @@ int main()
         if (e2r_is_key_pressed(GLFW_KEY_B))
         {
             show_bullet_items = !show_bullet_items;
+        }
+
+        if (e2r_ui__is_button_pressed(button))
+        {
+            button_toggled = !button_toggled;
+            e2r_ui__set_button_text(button, button_toggled ? button_txt2 : button_txt1);
         }
 
         // if (show_bullet_items)
