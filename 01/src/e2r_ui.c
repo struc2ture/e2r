@@ -14,6 +14,7 @@ list_define_type(E2R_UI_WindowList, E2R_UI_Window *);
 typedef struct _UICtx
 {
     E2R_UI_WindowList window_list;
+    bool debug_enabled;
 
 } _UICtx;
 
@@ -103,17 +104,17 @@ void _update_implicit_interactions()
         E2R_UI_Widget *widget;
         list_iterate(&window->widget_list, widget_i, widget)
         {
+            widget->is_hovered = false;
+            if (p_in_rect(e2r_get_mouse_pos(), widget->pos, widget->size))
+            {
+                widget->is_hovered = true;
+            }
+
             if (widget->kind == E2R_UI_WIDGET_BUTTON)
             {
                 widget->button.is_pressed = false;
-                widget->button.is_hovered = false;
 
-                if (p_in_rect(e2r_get_mouse_pos(), widget->pos, widget->size))
-                {
-                    widget->button.is_hovered = true;
-                }
-
-                if (widget->button.is_hovered && e2r_is_mouse_pressed(GLFW_MOUSE_BUTTON_LEFT))
+                if (widget->is_hovered && e2r_is_mouse_pressed(GLFW_MOUSE_BUTTON_LEFT))
                 {
                     widget->button.is_active = true;
                 }
@@ -135,6 +136,12 @@ void _render_widget(E2R_UI_Widget *w)
     const FontAtlas *font_atlas = e2r_get_font_atlas_TEMP();
     f32 pen_x = w->pos.x;
     f32 pen_y = w->pos.y;
+
+    if (_ui_ctx->debug_enabled && w->is_hovered)
+    {
+        e2r_draw_quad(w->pos, w->size, V4(0.7f, 0.2f, 0.2f, 1.0f));
+    }
+
     switch (w->kind)
     {
         case E2R_UI_WIDGET_LABEL:
@@ -168,7 +175,7 @@ void _render_widget(E2R_UI_Widget *w)
             f32 text_h = text_rect.max_y - text_rect.min_y;
 
             v4 color = _ui_styling->button_color;
-            if (w->button.is_hovered) color = _ui_styling->button_hovered_color;
+            if (w->is_hovered) color = _ui_styling->button_hovered_color;
             if (w->button.is_active) color = _ui_styling->button_active_color;
 
             e2r_draw_quad(w->pos, w->size, color);
@@ -231,7 +238,10 @@ void _render_windows()
     E2R_UI_Window **window_it;
     list_iterate(&_ui_ctx->window_list, window_i, window_it)
     {
-        _render_window(*window_it);
+        if ((*window_it)->is_visible)
+        {
+            _render_window(*window_it);
+        }
     }
 }
 
@@ -317,7 +327,7 @@ void _recalculate_window_layout(E2R_UI_Window *window)
 
 // =====================================
 
-void e2r_ui__init()
+void e2r_ui__init(bool enable_debug)
 {
     _ui_styling->window_bg_color = V4(0.2f, 0.2f, 0.2f, 1.0f);
     _ui_styling->window_border_color = V4(0.4f, 0.4f, 0.4f, 1.0f);
@@ -330,6 +340,8 @@ void e2r_ui__init()
     _ui_styling->button_color = V4(0.6f, 0.6f, 0.6f, 1.0f);
     _ui_styling->button_hovered_color = V4(0.5f, 0.5f, 0.5f, 1.0f);
     _ui_styling->button_active_color = V4(0.4f, 0.4f, 0.4f, 1.0f);
+
+    _ui_ctx->debug_enabled = enable_debug;
 }
 
 void e2r_ui__begin_frame()
@@ -348,7 +360,8 @@ E2R_UI_Window *e2r_ui__create_window(v2 pos, v2 size, const char *title)
     *window = (E2R_UI_Window){
         .pos = pos,
         .size = size,
-        .title = xstrdup(title)
+        .title = xstrdup(title),
+        .is_visible = true
     };
 
     list_append(&_ui_ctx->window_list, window);
@@ -409,6 +422,11 @@ E2R_UI_Widget *e2r_ui__add_button(E2R_UI_Window *window)
 }
 
 // ==========================================
+
+void e2r_ui__toggle_window_visibility(E2R_UI_Window *window)
+{
+    window->is_visible = !window->is_visible;
+}
 
 void e2r_ui__set_label_text(E2R_UI_Widget *w, const char *text)
 {

@@ -22,11 +22,11 @@ typedef struct
     const char *text;
     bool is_active;
     bool is_pressed;
-    bool is_hovered;
 
 } E2R_UI_Button;
 
-typedef enum {
+typedef enum
+{
     E2R_UI_WIDGET_LABEL,
     E2R_UI_WIDGET_BULLET_LIST,
     E2R_UI_WIDGET_BUTTON,
@@ -40,6 +40,7 @@ typedef struct
     v2 pos;
     v2 size;
     struct E2R_UI_Window *window;
+    bool is_hovered;
     union
     {
         E2R_UI_Label label;
@@ -60,10 +61,11 @@ typedef struct E2R_UI_Window
     E2R_UI_WidgetList widget_list;
 
     bool is_dragged;
+    bool is_visible;
 
 } E2R_UI_Window;
 
-void e2r_ui__init();
+void e2r_ui__init(bool enable_debug);
 
 void e2r_ui__begin_frame();
 void e2r_ui__end_frame();
@@ -75,6 +77,7 @@ E2R_UI_Widget *e2r_ui__add_label(E2R_UI_Window *window);
 E2R_UI_Widget *e2r_ui__add_bullet_list(E2R_UI_Window *window);
 E2R_UI_Widget *e2r_ui__add_button(E2R_UI_Window *window);
 
+void e2r_ui__toggle_window_visibility(E2R_UI_Window *window);
 void e2r_ui__set_label_text(E2R_UI_Widget *w, const char *text);
 void e2r_ui__add_bullet_list_item(E2R_UI_Widget *w, const char *item);
 void e2r_ui__set_button_text(E2R_UI_Widget *w, const char *text);
