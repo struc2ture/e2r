@@ -31,6 +31,7 @@ typedef struct _UIStyling
     v4 button_color;
     v4 button_hovered_color;
     v4 button_active_color;
+    f32 cursor_width;
 
 } _UIStyling;
 
@@ -110,22 +111,75 @@ void _update_implicit_interactions()
                 widget->is_hovered = true;
             }
 
-            if (widget->kind == E2R_UI_WIDGET_BUTTON)
+            switch (widget->kind)
             {
-                widget->button.is_pressed = false;
+                case E2R_UI_WIDGET_BUTTON:
+                {
+                    widget->button.is_pressed = false;
 
-                if (widget->is_hovered && e2r_is_mouse_pressed(GLFW_MOUSE_BUTTON_LEFT))
-                {
-                    widget->button.is_active = true;
-                }
-                if (widget->button.is_active && e2r_is_mouse_released(GLFW_MOUSE_BUTTON_LEFT))
-                {
-                    widget->button.is_active = false;
-                    if (p_in_rect(e2r_get_mouse_pos(), widget->pos, widget->size))
+                    if (widget->is_hovered && e2r_is_mouse_pressed(GLFW_MOUSE_BUTTON_LEFT))
                     {
-                        widget->button.is_pressed = true;
+                        widget->button.is_active = true;
+                    }
+                    if (widget->button.is_active && e2r_is_mouse_released(GLFW_MOUSE_BUTTON_LEFT))
+                    {
+                        widget->button.is_active = false;
+                        if (p_in_rect(e2r_get_mouse_pos(), widget->pos, widget->size))
+                        {
+                            widget->button.is_pressed = true;
+                        }
                     }
                 }
+                break;
+
+                case E2R_UI_WIDGET_TEXT_INPUT:
+                {
+                    if (e2r_is_mouse_pressed(GLFW_MOUSE_BUTTON_LEFT))
+                    {
+                        widget->text_input.is_active = widget->is_hovered;
+                    }
+
+                    if (widget->text_input.is_active)
+                    {
+                        char c = e2r_get_next_input_char();
+                        while (c)
+                        {
+                            widget->text_input.text_buf[widget->text_input.text_size++] = c;
+                            widget->text_input.current_pos++;
+                            c = e2r_get_next_input_char();
+                        }
+
+                        if (e2r_is_key_pressed(GLFW_KEY_BACKSPACE))
+                        {
+                            if (widget->text_input.text_size > 0)
+                            {
+                                widget->text_input.text_size--;
+                                widget->text_input.current_pos--;
+                                widget->text_input.text_buf[widget->text_input.text_size] = '\0';
+                            }
+                        }
+
+                        if (e2r_is_key_pressed(GLFW_KEY_LEFT))
+                        {
+                            if (widget->text_input.current_pos > 0)
+                            {
+                                widget->text_input.current_pos--;
+                            }
+                        }
+
+                        if (e2r_is_key_pressed(GLFW_KEY_RIGHT))
+                        {
+                            if (widget->text_input.current_pos < widget->text_input.text_size)
+                            {
+                                widget->text_input.current_pos++;
+                            }
+                        }
+                    }
+
+                }
+                break;
+
+                default: break;
             }
         }
     }
@@ -184,6 +238,36 @@ void _render_widget(E2R_UI_Widget *w)
             f32 text_y = w->pos.y - text_rect.min_y + w->size.y * 0.5f - text_h * 0.5f;
 
             e2r_draw_line(w->button.text, &text_x, &text_y, font_atlas, _ui_styling->text_color);
+        }
+        break;
+
+        case E2R_UI_WIDGET_TEXT_INPUT:
+        {
+            v4 color = _ui_styling->button_color;
+            if (w->text_input.is_active) color = _ui_styling->button_active_color;
+            e2r_draw_quad(w->pos, w->size, color);
+
+            if (w->text_input.text_size > 0)
+            {
+                f32 text_x = w->pos.x + _ui_styling->button_padding;
+                f32 text_y = w->pos.y + _ui_styling->button_padding;
+                f32 pen_x = text_x;
+                f32 pen_y = text_y;
+                e2r_draw_line(w->text_input.text_buf, &pen_x, &pen_y, font_atlas, _ui_styling->text_color);
+
+                if (w->text_input.is_active)
+                {
+                    f32 cursor_x = 0.0f;
+                    for (int i = 0; i < w->text_input.current_pos; i++)
+                    {
+                        cursor_x += font_loader_get_advance_x(font_atlas, w->text_input.text_buf[i]);
+                    }
+
+                    v2 cursor_pos = V2(text_x + cursor_x, text_y);
+                    v2 cursor_size = V2(_ui_styling->cursor_width, 20.0f);
+                    e2r_draw_quad(cursor_pos, cursor_size, V4(1.0f, 1.0f, 1.0f, 1.0f));
+                }
+            }
         }
         break;
     }
@@ -297,6 +381,12 @@ void _recalculate_widget_size(E2R_UI_Widget *w)
             w->size = V2(text_w + 2 * _ui_styling->button_padding, text_h + 2 * _ui_styling->button_padding);
         }
         break;
+
+        case E2R_UI_WIDGET_TEXT_INPUT:
+        {
+            w->size = V2(100.0f, 25.0f);
+        }
+        break;
     }
 }
 
@@ -340,6 +430,7 @@ void e2r_ui__init(bool enable_debug)
     _ui_styling->button_color = V4(0.6f, 0.6f, 0.6f, 1.0f);
     _ui_styling->button_hovered_color = V4(0.5f, 0.5f, 0.5f, 1.0f);
     _ui_styling->button_active_color = V4(0.4f, 0.4f, 0.4f, 1.0f);
+    _ui_styling->cursor_width = 2.0f;
 
     _ui_ctx->debug_enabled = enable_debug;
 }
@@ -416,6 +507,16 @@ E2R_UI_Widget *e2r_ui__add_button(E2R_UI_Window *window)
         .kind = E2R_UI_WIDGET_BUTTON,
         .window = window,
         .button.text = "Button"
+    };
+    list_append(&window->widget_list, widget);
+    return &window->widget_list.data[window->widget_list.size - 1];
+}
+
+E2R_UI_Widget *e2r_ui__add_text_input(E2R_UI_Window *window)
+{
+    E2R_UI_Widget widget = {
+        .kind = E2R_UI_WIDGET_TEXT_INPUT,
+        .window = window,
     };
     list_append(&window->widget_list, widget);
     return &window->widget_list.data[window->widget_list.size - 1];

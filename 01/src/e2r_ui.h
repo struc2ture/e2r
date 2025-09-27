@@ -3,6 +3,7 @@
 #include "common/types.h"
 #include "common/util.h"
 
+#define TEXT_INPUT_BUF_SIZE 256
 
 typedef struct
 {
@@ -25,11 +26,21 @@ typedef struct
 
 } E2R_UI_Button;
 
+typedef struct
+{
+    char text_buf[TEXT_INPUT_BUF_SIZE];
+    int text_size;
+    int current_pos;
+    bool is_active;
+
+} E2R_UI_TextInput;
+
 typedef enum
 {
     E2R_UI_WIDGET_LABEL,
     E2R_UI_WIDGET_BULLET_LIST,
     E2R_UI_WIDGET_BUTTON,
+    E2R_UI_WIDGET_TEXT_INPUT
 
 } E2R_UI_WidgetKind;
 
@@ -46,6 +57,7 @@ typedef struct
         E2R_UI_Label label;
         E2R_UI_BulletList bullet_list;
         E2R_UI_Button button;
+        E2R_UI_TextInput text_input;
     };
 
 } E2R_UI_Widget;
@@ -76,6 +88,7 @@ void e2r_ui__destroy_window(E2R_UI_Window *window);
 E2R_UI_Widget *e2r_ui__add_label(E2R_UI_Window *window);
 E2R_UI_Widget *e2r_ui__add_bullet_list(E2R_UI_Window *window);
 E2R_UI_Widget *e2r_ui__add_button(E2R_UI_Window *window);
+E2R_UI_Widget *e2r_ui__add_text_input(E2R_UI_Window *window);
 
 void e2r_ui__toggle_window_visibility(E2R_UI_Window *window);
 void e2r_ui__set_label_text(E2R_UI_Widget *w, const char *text);

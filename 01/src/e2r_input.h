@@ -3,6 +3,10 @@
 #include "common/types.h"
 
 void e2r_update_state(void *window);
+
+void e2r_add_input_char_to_queue(char ch);
+void e2r_clear_input_char_queue();
+
 bool e2r_is_key_down(int key);
 bool e2r_is_key_pressed(int key);
 bool e2r_is_key_released(int key);
@@ -14,3 +18,4 @@ bool e2r_is_mouse_pressed(int button);
 bool e2r_is_mouse_released(int button);
 void e2r_toggle_mouse_capture();
 bool e2r_is_mouse_captured();
+char e2r_get_next_input_char();

@@ -126,6 +126,8 @@ int main()
     e2r_ui__set_button_text(button, button_txt1);
     bool button_toggled = false;
 
+    E2R_UI_Widget *text_input = e2r_ui__add_text_input(window1);
+
     E2R_UI_Window *window2 = e2r_ui__create_window(V2(600.0f, 550.0f), V2(300.0f, 300.0f), "Second window");
     E2R_UI_Widget *second_label = e2r_ui__add_label(window2);
     e2r_ui__set_label_text(second_label, "Second window's label");
@@ -170,34 +172,12 @@ int main()
 
         offset += dt * speed;
 
-        // f32 pen_x = 600.0f;
-        // f32 pen_y = 600.0f;
-        // e2r_draw_string("Hello, world!\n", &pen_x, &pen_y, e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 1.0f, 1.0f));
-
-        // e2r_draw_string("YESSSS!", &pen_x, &pen_y, e2r_get_font_atlas_TEMP(), V4(1.0f, 1.0f, 0.0f, 1.0f));
-
-        // e2r_draw_quad(V2(offset + 000.0f, offset + 000.0f), V2(50.0f, 50.0f), V4(1.0f, 0.0f, 0.0f, 1.0f));
-        // e2r_draw_circle(V2(offset + 050.0f, offset + 050.0f), V2(50.0f, 50.0f), V4(0.0f, 1.0f, 0.0f, 1.0f));
-        // e2r_draw_quad(V2(offset + 100.0f, offset + 100.0f), V2(50.0f, 50.0f), V4(0.0f, 0.0f, 1.0f, 1.0f));
-
         if (e2r_ui__is_button_pressed(button))
         {
             button_toggled = !button_toggled;
             e2r_ui__set_button_text(button, button_toggled ? button_txt2 : button_txt1);
             e2r_ui__toggle_window_visibility(window2);
         }
-
-        // if (show_bullet_items)
-        // {
-        //     e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 1");
-        //     e2r_ui__submit_bullet_list_item(bullet_list1, "Hello 2");
-        // }
-
-        // if (e2r_ui__is_button_pressed(button))
-        // {
-        //     button_pressed = !button_pressed;
-        //     e2r_ui__set_button_text(button, button_pressed ? button_txt2 : button_txt1);
-        // }
 
         e2r_ui__end_frame();
 

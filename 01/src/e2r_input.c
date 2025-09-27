@@ -7,6 +7,8 @@
 #include "common/util.h"
 #include "e2r_core.h"
 
+#define MAX_INPUT_CHAR_QUEUE 32
+
 typedef struct _InputCtx
 {
     bool current_key_states[GLFW_KEY_LAST + 1];
@@ -22,6 +24,9 @@ typedef struct _InputCtx
     bool prev_mouse_valid;
 
     bool mouse_captured;
+
+    char input_char_queue[MAX_INPUT_CHAR_QUEUE];
+    int current_input_char;
 
 } _InputCtx;
 
@@ -63,6 +68,18 @@ void e2r_update_state(void *window)
     _input_ctx->mouse_delta_smooth.y =
         _input_ctx->mouse_smooth_factor * _input_ctx->mouse_delta_smooth.y +
         (1.0f - _input_ctx->mouse_smooth_factor) * _input_ctx->mouse_delta.y;
+}
+
+void e2r_add_input_char_to_queue(char ch)
+{
+    bassert(_input_ctx->current_input_char < MAX_INPUT_CHAR_QUEUE);
+    if (_input_ctx->current_input_char < 0) _input_ctx->current_input_char = 0;
+    _input_ctx->input_char_queue[_input_ctx->current_input_char++] = ch;
+}
+
+void e2r_clear_input_char_queue()
+{
+    // _input_ctx->current_input_char = -1;
 }
 
 bool e2r_is_key_down(int key)
@@ -129,4 +146,16 @@ void e2r_toggle_mouse_capture()
 bool e2r_is_mouse_captured()
 {
     return _input_ctx->mouse_captured;
+}
+
+char e2r_get_next_input_char()
+{
+    if (_input_ctx->current_input_char >= 0)
+    {
+        return _input_ctx->input_char_queue[_input_ctx->current_input_char--];
+    }
+    else
+    {
+        return '\0';
+    }
 }

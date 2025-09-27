@@ -223,6 +223,11 @@ v2 _glfw_get_window_size()
     return V2(w, h);
 }
 
+void _glfw_callback_char(GLFWwindow* window, unsigned int codepoint)
+{
+    e2r_add_input_char_to_queue((char)codepoint);
+}
+
 VkInstance _vk_create_instance()
 {
     VkApplicationInfo app_info = {};
@@ -1869,6 +1874,8 @@ void e2r_init(int width, int height, const char *name)
     ctx.font_atlas = font_loader_create_atlas("res/DMMono-Regular.ttf", 512, 512, 18.0f, 2.0f, 4);
     ctx.font_atlas_texture = _vk_load_texture_from_font_atlas(&ctx.font_atlas);
 
+    glfwSetCharCallback(ctx.glfw_window, _glfw_callback_char);
+
     _vk_create_swapchain_dependent();
 }
 
@@ -2230,5 +2237,8 @@ void e2r_end_frame()
     _e2r_acquire_next_image();
     _e2r_render();
     _e2r_present();
+
     ctx.current_vk_frame = (ctx.current_vk_frame + 1) % FRAMES_IN_FLIGHT;
+
+    e2r_clear_input_char_queue();
 }
